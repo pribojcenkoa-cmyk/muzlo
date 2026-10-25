@@ -92,7 +92,7 @@ async function performSearch(query) {
   }
 }
 
-// 3. ПЛЕЕР (Сохранение)
+// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА (ИСПРАВЛЕНО)
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -119,13 +119,23 @@ async function restorePlayerState() {
     }
     currentTrackRealDuration = track.duration || 0;
     totalTimeEl.textContent = formatTime(currentTrackRealDuration);
+    
+    // Загружаем источник, но НЕ включаем
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
-    btnPlay.textContent = '▶';
+    btnPlay.textContent = '▶'; // Кнопка Play
 
+    // Как только метаданные загрузятся, ставим сохраненную позицию
     audioPlayer.addEventListener('loadedmetadata', () => {
-      if (savedTime > 0 && savedTime < audioPlayer.duration) audioPlayer.currentTime = savedTime;
+      if (savedTime > 0 && savedTime < audioPlayer.duration) {
+        audioPlayer.currentTime = savedTime;
+        currentTimeEl.textContent = formatTime(savedTime);
+      }
     }, { once: true });
+
+    // Если пользователь нажмет Play, браузер разблокирует автовоспроизведение
+    // и продолжит с того же места.
+
   } catch (e) {}
 }
 
@@ -367,7 +377,7 @@ function switchTab(activeTab, title, showSearch = false) {
   if (activeTab) activeTab.classList.add('active');
   pageTitle.textContent = title;
   searchContainer.style.display = showSearch ? 'block' : 'none';
-  profileStats.style.display = 'none'; // Скрываем статистику при переходе
+  profileStats.style.display = 'none';
 }
 
 navHome.addEventListener('click', async () => {
