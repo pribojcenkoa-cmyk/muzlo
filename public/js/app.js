@@ -6,11 +6,9 @@ const trackListEl = document.getElementById('track-list');
 const pageTitle = document.getElementById('page-title');
 const searchContainer = document.getElementById('search-container');
 const searchInput = document.getElementById('search-input');
-
 const navHome = document.getElementById('nav-home');
 const navSearch = document.getElementById('nav-search');
 const navLibrary = document.getElementById('nav-library');
-
 const btnPlay = document.getElementById('btn-play');
 const btnNext = document.getElementById('btn-next');
 const btnPrev = document.getElementById('btn-prev');
@@ -21,7 +19,6 @@ const seekSlider = document.getElementById('seek-slider');
 const volumeSlider = document.getElementById('volume-slider');
 const currentTimeEl = document.getElementById('current-time');
 const totalTimeEl = document.getElementById('total-time');
-
 const authModal = document.getElementById('auth-modal');
 const authForm = document.getElementById('auth-form');
 const authContainer = document.getElementById('auth-container');
@@ -64,13 +61,12 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА
+// 3. СОХРАНЕНИЕ ПЛЕЕРА
 // ==========================================
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
   if (!track) return;
-  
   localStorage.setItem('muzlo_current_track', JSON.stringify(track));
   localStorage.setItem('muzlo_current_time', audioPlayer.currentTime);
 }
@@ -78,44 +74,29 @@ function savePlayerState() {
 async function restorePlayerState() {
   const savedTrackJson = localStorage.getItem('muzlo_current_track');
   const savedTime = parseFloat(localStorage.getItem('muzlo_current_time') || 0);
-  
   if (!savedTrackJson) return;
 
   try {
     const track = JSON.parse(savedTrackJson);
-    
-    // Показываем плеер
-    const playerEl = document.querySelector('.player');
-    if (playerEl) playerEl.classList.remove('hidden');
-
+    document.querySelector('.player')?.classList.remove('hidden');
     playerTitle.textContent = track.title;
     playerArtist.textContent = track.artist_name || 'Неизвестен';
-    
     if (track.cover_url) {
       playerCover.src = track.cover_url;
       playerCover.classList.remove('hidden');
     } else {
       playerCover.classList.add('hidden');
     }
-
     currentTrackRealDuration = track.duration || 0;
     totalTimeEl.textContent = formatTime(currentTrackRealDuration);
-    
-    // Устанавливаем трек, но НЕ включаем его (браузер заблокирует автоплей)
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
     btnPlay.textContent = '▶';
 
-    // Как только метаданные загрузятся, ставим сохраненное время
     audioPlayer.addEventListener('loadedmetadata', () => {
-      if (savedTime > 0 && savedTime < audioPlayer.duration) {
-        audioPlayer.currentTime = savedTime;
-      }
+      if (savedTime > 0 && savedTime < audioPlayer.duration) audioPlayer.currentTime = savedTime;
     }, { once: true });
-
-  } catch (e) {
-    console.error('Ошибка восстановления плеера', e);
-  }
+  } catch (e) {}
 }
 
 // ==========================================
@@ -124,7 +105,6 @@ async function restorePlayerState() {
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
   trackListEl.innerHTML = '';
-  
   if (currentTracks.length === 0) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ничего не найдено.</p>';
     return;
@@ -134,10 +114,9 @@ function renderTracks(tracksArray, isLibrary = false) {
     const div = document.createElement('div');
     div.className = 'track-item';
     div.dataset.index = index;
-    
     const actionBtnHTML = isLibrary 
-      ? `<button class="btn-delete" title="Удалить из медиатеки">✕</button>` 
-      : `<button class="btn-like" title="Сохранить в медиатеку">♥</button>`;
+      ? `<button class="btn-delete" title="Удалить">✕</button>` 
+      : `<button class="btn-like" title="Сохранить">♥</button>`;
 
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
@@ -149,15 +128,13 @@ function renderTracks(tracksArray, isLibrary = false) {
       ${actionBtnHTML}
     `;
 
-    const imgEl = div.querySelector('.track-cover');
-    imgEl.onerror = function() {
+    div.querySelector('.track-cover').onerror = function() {
       this.onerror = null; 
       this.src = '/img/default-cover.png';
     };
 
     div.addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
-      
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
@@ -165,15 +142,14 @@ function renderTracks(tracksArray, isLibrary = false) {
     });
 
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
-    
     if (isLibrary) {
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('Удалить этот трек из медиатеки?')) return;
+        if (!confirm('Удалить этот трек?')) return;
         try {
           const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
           if (res.ok) navLibrary.click();
-        } catch (err) { console.error('Ошибка удаления:', err); }
+        } catch (err) {}
       });
     } else {
       actionBtn.addEventListener('click', async (e) => {
@@ -184,35 +160,17 @@ function renderTracks(tracksArray, isLibrary = false) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              track_id: String(track.id),
-              title: track.title,
-              artist_name: track.artist_name,
-              cover_url: track.cover_url,
-              duration: track.duration,
-              stream_url: streamUrl
+              track_id: String(track.id), title: track.title, artist_name: track.artist_name,
+              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl
             })
           });
-
           if (res.status === 401) {
-            alert('Войдите в аккаунт, чтобы сохранять треки!');
-            authModal.classList.add('active');
-            return;
+            alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
           }
-          
-          if (!res.ok) {
-            const errData = await res.json();
-            alert(errData.error); 
-            return;
-          }
-
-          if (res.ok) {
-            actionBtn.classList.add('liked');
-            actionBtn.textContent = '❤';
-          }
-        } catch (err) { console.error('Ошибка сохранения:', err); }
+          if (res.ok) { actionBtn.classList.add('liked'); actionBtn.textContent = '❤'; }
+        } catch (err) {}
       });
     }
-
     trackListEl.appendChild(div);
   });
 }
@@ -229,33 +187,28 @@ trackListEl.addEventListener('click', (e) => {
 // ==========================================
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
-  
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
   pageTitle.textContent = `Артист: ${artistName}`;
   searchContainer.style.display = 'none';
-  
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   
   try {
     const res = await fetchWithTimeout(`/api/search/artist?name=${encodeURIComponent(artistName)}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    
     renderTracks(data.tracks);
-    
-    const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">← Назад на главную</button>`;
+    const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад</button>`;
     trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
     document.getElementById('btn-back-home').addEventListener('click', () => navHome.click());
-    
   } catch (err) {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 }
 
 // ==========================================
-// 6. ПЛЕЕР
+// 6. ПЛЕЕР (ИСПРАВЛЕНО ДЛЯ МОБИЛЬНЫХ)
 // ==========================================
-async function playTrack(track) {
+// Убрали async, чтобы play() срабатывал МГНОВЕННО при клике
+function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
     playerEl.classList.remove('hidden');
@@ -275,28 +228,30 @@ async function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
+  // Устанавливаем ссылку и запускаем СРАЗУ
   audioPlayer.src = getStreamUrl(track);
-  
-  if (track.permalink_url) {
-    try {
-      const res = await fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`);
-      const data = await res.json();
-      if (data.duration) {
-        currentTrackRealDuration = data.duration;
-        totalTimeEl.textContent = formatTime(data.duration);
-      }
-    } catch (e) { console.log('Точная длительность не получена'); }
-  }
   
   audioPlayer.play().then(() => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
-    savePlayerState(); // Сохраняем при запуске
+    savePlayerState();
   }).catch(err => {
     console.error('Ошибка аудио:', err);
     btnPlay.textContent = '▶';
     isPlaying = false;
   });
+
+  // А точную длительность запрашиваем В ФОНЕ, чтобы не блокировать запуск
+  if (track.permalink_url) {
+    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.duration) {
+          currentTrackRealDuration = data.duration;
+          totalTimeEl.textContent = formatTime(data.duration);
+        }
+      }).catch(e => console.log('Длительность не получена'));
+  }
 }
 
 btnPlay.addEventListener('click', () => {
@@ -305,7 +260,7 @@ btnPlay.addEventListener('click', () => {
     audioPlayer.pause();
     btnPlay.textContent = '▶';
     isPlaying = false;
-    savePlayerState(); // Сохраняем время при паузе
+    savePlayerState();
   } else {
     audioPlayer.play();
     btnPlay.textContent = '⏸';
@@ -315,14 +270,12 @@ btnPlay.addEventListener('click', () => {
 
 btnNext.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
-  let nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-  document.querySelector(`.track-item[data-index="${nextIndex}"]`)?.click();
+  document.querySelector(`.track-item[data-index="${(currentTrackIndex + 1) % currentTracks.length}"]`)?.click();
 });
 
 btnPrev.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
-  let prevIndex = (currentTrackIndex - 1 + currentTracks.length) % currentTracks.length;
-  document.querySelector(`.track-item[data-index="${prevIndex}"]`)?.click();
+  document.querySelector(`.track-item[data-index="${(currentTrackIndex - 1 + currentTracks.length) % currentTracks.length}"]`)?.click();
 });
 
 audioPlayer.addEventListener('timeupdate', () => {
@@ -330,29 +283,21 @@ audioPlayer.addEventListener('timeupdate', () => {
   if (!duration || isNaN(duration)) return;
   seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
-  
-  // Сохраняем прогресс каждые 3 секунды (чтобы не спамить localStorage)
-  if (Math.floor(audioPlayer.currentTime) % 3 === 0) {
-    savePlayerState();
-  }
+  if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
 
 audioPlayer.addEventListener('loadedmetadata', () => {
-  const duration = currentTrackRealDuration || audioPlayer.duration;
-  totalTimeEl.textContent = formatTime(duration);
+  totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
 seekSlider.addEventListener('change', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
-  if (!duration || isNaN(duration)) return;
-  const seekTime = (seekSlider.value / 100) * duration;
-  audioPlayer.currentTime = seekTime;
+  if (!duration) return;
+  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
   savePlayerState();
 });
 
-volumeSlider.addEventListener('input', () => {
-  audioPlayer.volume = volumeSlider.value;
-});
+volumeSlider.addEventListener('input', () => audioPlayer.volume = volumeSlider.value);
 
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
@@ -360,11 +305,10 @@ audioPlayer.addEventListener('ended', () => {
   btnNext.click();
 });
 
-// Сохраняем при закрытии/обновлении страницы
 window.addEventListener('beforeunload', savePlayerState);
 
 // ==========================================
-// 7. НАВИГАЦИЯ
+// 7. НАВИГАЦИЯ И АВТОРИЗАЦИЯ
 // ==========================================
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
@@ -379,7 +323,6 @@ navHome.addEventListener('click', async () => {
   try {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
     renderTracks(data.tracks);
   } catch (err) {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает.</p>';
@@ -396,19 +339,15 @@ let searchTimeout;
 searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const query = e.target.value.trim();
-  
   if (query.length < 2) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
     return;
   }
-
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
-
   searchTimeout = setTimeout(async () => {
     try {
       const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
       renderTracks(data.tracks);
     } catch (err) {
       trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска.</p>';
@@ -432,9 +371,6 @@ navLibrary.addEventListener('click', async () => {
   }
 });
 
-// ==========================================
-// 8. АВТОРИЗАЦИЯ
-// ==========================================
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
   if (e.target.id === 'btn-logout') logout();
@@ -442,12 +378,7 @@ authContainer.addEventListener('click', (e) => {
 
 function updateAuthUI(user) {
   if (user) {
-    authContainer.innerHTML = `
-      <div class="profile-info">
-        <span>👤 ${user.email}</span>
-        <button class="btn-logout" id="btn-logout">Выйти</button>
-      </div>
-    `;
+    authContainer.innerHTML = `<div class="profile-info"><span>👤 ${user.email}</span><button class="btn-logout" id="btn-logout">Выйти</button></div>`;
   } else {
     authContainer.innerHTML = `<button class="btn-auth" id="btn-open-auth">Войти</button>`;
   }
@@ -468,23 +399,17 @@ authForm.addEventListener('submit', async (e) => {
   const email = document.getElementById('auth-email').value;
   const password = document.getElementById('auth-password').value;
   const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
-  
   try {
     const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Ошибка');
-    
     authModal.classList.remove('active');
     updateAuthUI(data.user);
     authForm.reset();
     if (navLibrary.classList.contains('active')) navLibrary.click();
-  } catch (err) {
-    alert(err.message);
-  }
+  } catch (err) { alert(err.message); }
 });
 
 async function logout() {
@@ -500,11 +425,11 @@ async function checkAuth() {
       const data = await res.json();
       updateAuthUI(data.user);
     }
-  } catch (err) { }
+  } catch (err) {}
 }
 
 // ==========================================
-// 9. СТАРТ
+// 8. СТАРТ
 // ==========================================
 checkAuth();
 restorePlayerState(); 
