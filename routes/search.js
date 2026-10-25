@@ -7,8 +7,7 @@ const PIPED_APIS = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
   'https://api.piped.private.coffee',
-  'https://pipedapi.leptons.xyz',
-  'https://piped-api.privacy.com.de'
+  'https://pipedapi.leptons.xyz'
 ];
 
 async function fetchPiped(endpoint) {
@@ -42,7 +41,7 @@ router.get('/trending', async (req, res) => {
     const queries = ['top music 2024', 'popular hits', 'lofi hip hop', 'rock classics', 'electronic dance', 'chillout'];
     const randomQuery = queries[Math.floor(Math.random() * queries.length)];
     const { data } = await fetchPiped(`/search?q=${encodeURIComponent(randomQuery)}&filter=music_songs`);
-    const filteredItems = data.items.filter(item => item.duration < 900); // Только до 15 минут
+    const filteredItems = data.items.filter(item => item.duration < 900); 
     res.json({ tracks: filteredItems.map(mapTrack) });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки' });
@@ -73,44 +72,31 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// ПРОКСИРОВАНИЕ ПОТОКА (Обходит блокировки и 500 ошибки)
+// ИСПРАВЛЕННЫЙ РЕДИРЕКТ (Браузер сам скачает музыку)
 router.get('/stream/:id', async (req, res) => {
   try {
     const videoId = req.params.id;
-    const { data } = await fetchPiped(`/streams/${videoId}`);
+    const { data, api } = await fetchPiped(`/streams/${videoId}`);
     
     if (!data.audioStreams || data.audioStreams.length === 0) {
       throw new Error('Аудио не найдено');
     }
 
-    const bestAudio = data.audioStreams[0];
-    const audioUrl = bestAudio.url; // Берем прямую ссылку
+    const bestAudio = data.audioStreams.find(a => a.proxyUrl) || data.audioStreams[0];
+    let audioUrl = bestAudio.proxyUrl || bestAudio.url;
 
     if (!audioUrl) throw new Error('Ссылка не найдена');
 
-    // Передаем заголовок Range для перемотки
-    const headers = { 'User-Agent': 'Mozilla/5.0' };
-    if (req.headers.range) headers['Range'] = req.headers.range;
-
-    // Скачиваем поток и отдаем браузеру
-    const audioRes = await axios({
-      method: 'get',
-      url: audioUrl,
-      responseType: 'stream',
-      headers: headers,
-      validateStatus: status => status >= 200 && status < 400
-    });
-
-    res.status(audioRes.status);
-    if (audioRes.headers['content-range']) res.setHeader('Content-Range', audioRes.headers['content-range']);
-    if (audioRes.headers['accept-ranges']) res.setHeader('Accept-Ranges', audioRes.headers['accept-ranges']);
-    if (audioRes.headers['content-length']) res.setHeader('Content-Length', audioRes.headers['content-length']);
-    res.setHeader('Content-Type', 'audio/mpeg');
-
-    audioRes.data.pipe(res);
+    // Если ссылка относительная, приклеиваем домен сервера Piped
+    if (audioUrl.startsWith('/')) {
+      audioUrl = `${api}${audioUrl}`;
+    }
+    
+    // Отправляем браузер пользователя прямо на этот адрес
+    return res.redirect(audioUrl);
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);
-    if (!res.headersSent) res.status(500).send('Ошибка стриминга');
+    res.status(500).send('Ошибка стриминга');
   }
 });
 
