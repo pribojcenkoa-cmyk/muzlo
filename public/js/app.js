@@ -29,6 +29,7 @@ const importBtn = document.getElementById('import-btn');
 const importModal = document.getElementById('import-modal');
 const btnCloseImport = document.getElementById('btn-close-import');
 const importUrlInput = document.getElementById('import-url');
+const importTextInput = document.getElementById('import-text');
 const btnDoImport = document.getElementById('btn-do-import');
 const importStatus = document.getElementById('import-status');
 
@@ -62,7 +63,6 @@ function getStreamUrl(track) {
   return `/api/tracks/${track.id}/stream`;
 }
 
-// Инициализация Web Audio API
 function initAudioContext() {
   if (audioContext) return;
   try {
@@ -282,7 +282,6 @@ function playTrack(track) {
     playerEl.classList.remove('hidden');
   }
 
-  // Инициализируем Web Audio при первом клике (браузер требует жест пользователя)
   initAudioContext();
   if (audioContext && audioContext.state === 'suspended') {
     audioContext.resume();
@@ -395,11 +394,9 @@ function updateVolume() {
   volumeLabel.textContent = value + '%';
 
   if (value <= 100) {
-    // Обычная громкость
     if (gainNode) gainNode.gain.value = 1;
     audioPlayer.volume = value / 100;
   } else {
-    // Усиление выше 100%
     audioPlayer.volume = 1;
     if (gainNode) gainNode.gain.value = value / 100; // 1.0 - 3.0
   }
@@ -601,6 +598,7 @@ if (importBtn) {
     importModal.classList.add('active');
     importStatus.textContent = ''; 
     importUrlInput.value = ''; 
+    importTextInput.value = '';
   });
 }
 
@@ -608,31 +606,68 @@ btnCloseImport.addEventListener('click', () => importModal.classList.remove('act
 importModal.addEventListener('click', (e) => { if (e.target === importModal) importModal.classList.remove('active'); });
 
 btnDoImport.addEventListener('click', async () => {
-  let url = importUrlInput.value.trim();
-  
-  if (!url) {
-    importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Введите ссылку';
+  const url = importUrlInput.value.trim();
+  const text = importTextInput.value.trim();
+
+  // 1. Если пользователь вставил текст (для Яндекса)
+  if (text) {
+    importStatus.style.color = '#1db954'; 
+    importStatus.textContent = 'Ищем треки в SoundCloud...';
+    btnDoImport.disabled = true;
+
+    try {
+      const res = await fetch('/api/search/import-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+
+      if (data.tracks && data.tracks.length > 0) {
+        importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
+        setTimeout(() => {
+          importModal.classList.remove('active');
+          switchTab(navSearch, 'Импортированные треки', false);
+          renderTracks(data.tracks);
+          btnDoImport.disabled = false;
+          importTextInput.value = '';
+        }, 1500);
+      } else {
+        importStatus.style.color = '#ff4d4d';
+        importStatus.textContent = data.error || 'Ничего не найдено.';
+        btnDoImport.disabled = false;
+      }
+    } catch (err) {
+      importStatus.style.color = '#ff4d4d';
+      importStatus.textContent = 'Ошибка соединения.';
+      btnDoImport.disabled = false;
+    }
     return;
   }
 
-  if (url.includes('?')) {
-    url = url.split('?')[0];
+  // 2. Если пользователь вставил ссылку (для SoundCloud)
+  if (!url) {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Введите ссылку или вставьте список треков';
+    return;
   }
 
+  let cleanUrl = url;
+  if (cleanUrl.includes('?')) cleanUrl = cleanUrl.split('?')[0];
+
   let endpoint = '';
-  if (url.includes('soundcloud.com')) {
-    endpoint = `/api/search/import-likes?url=${encodeURIComponent(url)}`;
-  } else if (url.includes('music.yandex.ru')) {
-    endpoint = `/api/search/import-yandex?url=${encodeURIComponent(url)}`;
+  if (cleanUrl.includes('soundcloud.com')) {
+    endpoint = `/api/search/import-likes?url=${encodeURIComponent(cleanUrl)}`;
+  } else if (cleanUrl.includes('music.yandex.ru')) {
+    endpoint = `/api/search/import-yandex?url=${encodeURIComponent(cleanUrl)}`;
   } else {
     importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Поддерживаются только SoundCloud и Яндекс.Музыка';
+    importStatus.textContent = 'Вставьте ссылку SoundCloud/Яндекс или список треков';
     return;
   }
 
   importStatus.style.color = '#1db954'; 
-  importStatus.textContent = 'Загрузка... Пожалуйста, подождите (это может занять до 30 секунд).';
+  importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
   btnDoImport.disabled = true;
 
   try {
@@ -641,7 +676,6 @@ btnDoImport.addEventListener('click', async () => {
 
     if (data.tracks && data.tracks.length > 0) {
       importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
-      
       setTimeout(() => {
         importModal.classList.remove('active');
         switchTab(navSearch, 'Импортированные треки', false);
@@ -650,18 +684,18 @@ btnDoImport.addEventListener('click', async () => {
       }, 1500);
     } else {
       importStatus.style.color = '#ff4d4d';
-      importStatus.textContent = data.error || 'Треки не найдены. Проверьте ссылку.';
+      importStatus.textContent = data.error || 'Треки не найдены.';
       btnDoImport.disabled = false;
     }
   } catch (err) {
     importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Ошибка соединения. Попробуйте позже.';
+    importStatus.textContent = 'Ошибка соединения.';
     btnDoImport.disabled = false;
   }
 });
 
 // 10. СТАРТ
-initAudioContext(); // Инициализируем аудиоконтекст
+initAudioContext(); 
 restorePlayerState(); 
 checkAuth();
 navHome.click();

@@ -74,7 +74,6 @@
       </div>
     </div>
 
-    <!-- Блок громкости с усилением -->
     <div class="player-volume">
       <span>🔊</span>
       <input type="range" id="volume-slider" value="50" min="0" max="300" step="1">
@@ -109,16 +108,20 @@
       
       <div style="text-align: left; background: #242424; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #b3b3b3;">
         <p style="margin-bottom: 10px; color: #fff; font-weight: bold;">Как это работает?</p>
-        <p style="margin-bottom: 10px;">Вы можете вставить ссылку на ваш профиль из <b>SoundCloud</b> или на плейлист из <b>Яндекс.Музыки</b>.</p>
-        <ol style="margin-left: 20px; display: flex; flex-direction: column; gap: 8px;">
-          <li><b>Для SoundCloud:</b> скопируйте ссылку на ваш профиль. <br><span style="color:#1db954; font-size: 12px;">https://soundcloud.com/ваш_ник</span></li>
-          <li><b>Для Яндекс.Музыки:</b> откройте любой ваш плейлист, нажмите «Поделиться» и скопируйте ссылку. <br><span style="color:#1db954; font-size: 12px;">https://music.yandex.ru/users/ваш_ник/playlists/1</span></li>
-          <li>Вставьте ссылку в поле ниже и нажмите «Загрузить».</li>
-        </ol>
-        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Для Яндекса: треки будут найдены в SoundCloud. Если их там нет — они не добавятся.</p>
+        
+        <p style="margin-bottom: 5px;"><b>1. SoundCloud:</b> вставьте ссылку на ваш профиль.</p>
+        <p style="color:#1db954; font-size: 12px; margin-bottom: 15px;">https://soundcloud.com/ваш_ник</p>
+        
+        <p style="margin-bottom: 5px;"><b>2. Яндекс.Музыка:</b> откройте плейлист, нажмите <b>Ctrl+A</b> (выделить всё), скопируйте и вставьте текст в поле ниже.</p>
+        
+        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Для Яндекса треки будут найдены в SoundCloud. Если их там нет — они не добавятся.</p>
       </div>
       
-      <input type="text" id="import-url" placeholder="https://soundcloud.com/... или https://music.yandex.ru/...">
+      <input type="text" id="import-url" placeholder="https://soundcloud.com/ваш_ник">
+      
+      <!-- Поле для списка треков -->
+      <textarea id="import-text" placeholder="Или вставьте список треков (Артист - Название), каждый с новой строки" style="width: 100%; height: 100px; margin-bottom: 16px; padding: 12px; background: #121212; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 14px; box-sizing: border-box; resize: vertical;"></textarea>
+      
       <button type="button" class="btn-submit" id="btn-do-import">Загрузить</button>
       <div id="import-status" style="margin-top: 15px; font-size: 14px;"></div>
     </div>
