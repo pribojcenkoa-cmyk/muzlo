@@ -26,7 +26,6 @@ async function searchSoundCloud(query, offset = 0) {
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
-
       const proxyCover = cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null;
 
       return {
@@ -47,14 +46,11 @@ router.get('/trending', async (req, res) => {
   try {
     const randomArtist = POPULAR_ARTISTS[Math.floor(Math.random() * POPULAR_ARTISTS.length)];
     const randomOffset = Math.floor(Math.random() * 4) * 10;
-    
     const tracks = await searchSoundCloud(randomArtist, randomOffset);
-    
     const artistTracks = tracks.filter(t => 
       t.artist_name.toLowerCase().includes(randomArtist.toLowerCase()) || 
       randomArtist.toLowerCase().includes(t.artist_name.toLowerCase())
     );
-    
     res.json({ tracks: artistTracks.length > 0 ? artistTracks : tracks });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки' });
@@ -86,7 +82,6 @@ router.get('/info', async (req, res) => {
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
-  
   try {
     const tracks = await searchSoundCloud(artistName);
     const filteredTracks = tracks.filter(t => {
@@ -104,9 +99,7 @@ router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
     if (!imageUrl) return res.status(400).send('Нет URL');
-    const response = await axios.get(imageUrl, { 
-      responseType: 'stream', headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
+    const response = await axios.get(imageUrl, { responseType: 'stream', headers: { 'User-Agent': 'Mozilla/5.0' } });
     res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     response.data.pipe(res);
@@ -115,11 +108,11 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// СТРИМИНГ (Прямая ссылка для идеальной перемотки)
+// СТРИМИНГ (С поддержкой Range через прокси)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
-    if (!trackUrl) throw new Error('Ссылка не передана');
+    if (!trackUrl) return res.status(400).send('Ссылка не передана');
 
     const info = await scdl.getInfo(trackUrl);
     let directUrl = null;
@@ -137,14 +130,26 @@ router.get('/stream', async (req, res) => {
       }
     }
 
-    if (directUrl) {
-      return res.redirect(directUrl);
-    }
+    if (!directUrl) throw new Error('Прямая ссылка не найдена');
 
-    // Фоллбек, если прямой ссылки нет
-    const stream = await scdl.download(trackUrl);
+    // ПЕРЕДАЕМ ЗАГОЛОВОК RANGE
+    const headers = { 'User-Agent': 'Mozilla/5.0' };
+    if (req.headers.range) headers['Range'] = req.headers.range;
+
+    const response = await axios.get(directUrl, {
+      responseType: 'stream',
+      headers: headers,
+      validateStatus: status => status >= 200 && status < 400
+    });
+
+    // Копируем заголовки, чтобы браузер понял, что перемотка возможна
+    res.status(response.status);
+    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
     res.setHeader('Content-Type', 'audio/mpeg');
-    stream.pipe(res);
+
+    response.data.pipe(res);
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
