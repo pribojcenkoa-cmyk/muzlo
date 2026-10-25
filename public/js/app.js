@@ -92,7 +92,7 @@ async function performSearch(query) {
   }
 }
 
-// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА (ИСПРАВЛЕНО)
+// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -120,21 +120,16 @@ async function restorePlayerState() {
     currentTrackRealDuration = track.duration || 0;
     totalTimeEl.textContent = formatTime(currentTrackRealDuration);
     
-    // Загружаем источник, но НЕ включаем
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
-    btnPlay.textContent = '▶'; // Кнопка Play
+    btnPlay.textContent = '▶';
 
-    // Как только метаданные загрузятся, ставим сохраненную позицию
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
         audioPlayer.currentTime = savedTime;
         currentTimeEl.textContent = formatTime(savedTime);
       }
     }, { once: true });
-
-    // Если пользователь нажмет Play, браузер разблокирует автовоспроизведение
-    // и продолжит с того же места.
 
   } catch (e) {}
 }
@@ -252,7 +247,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (С записью в историю)
+// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -280,7 +275,6 @@ function playTrack(track) {
     btnPlay.textContent = '⏸';
     savePlayerState();
     
-    // ЗАПИСЬ В ИСТОРИЮ
     fetch('/api/search/history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -551,7 +545,7 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// 9. ИМПОРТ
+// 9. ИМПОРТ (С ОЧИСТКОЙ ССЫЛКИ)
 if (importBtn) {
   importBtn.addEventListener('click', () => {
     importModal.classList.add('active');
@@ -564,32 +558,50 @@ btnCloseImport.addEventListener('click', () => importModal.classList.remove('act
 importModal.addEventListener('click', (e) => { if (e.target === importModal) importModal.classList.remove('active'); });
 
 btnDoImport.addEventListener('click', async () => {
-  const url = importUrlInput.value.trim();
-  if (!url || !url.includes('soundcloud.com')) {
+  let url = importUrlInput.value.trim();
+  
+  if (!url) {
     importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Введите корректную ссылку (https://soundcloud.com/...)';
+    importStatus.textContent = 'Введите ссылку';
+    return;
+  }
+
+  // Очищаем ссылку от лишних параметров (utm_source и т.д.)
+  if (url.includes('?')) {
+    url = url.split('?')[0];
+  }
+
+  let endpoint = '';
+  if (url.includes('soundcloud.com')) {
+    endpoint = `/api/search/import-likes?url=${encodeURIComponent(url)}`;
+  } else if (url.includes('music.yandex.ru')) {
+    endpoint = `/api/search/import-yandex?url=${encodeURIComponent(url)}`;
+  } else {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Поддерживаются только SoundCloud и Яндекс.Музыка';
     return;
   }
 
   importStatus.style.color = '#1db954'; 
-  importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
+  importStatus.textContent = 'Загрузка... Пожалуйста, подождите (это может занять до 30 секунд).';
   btnDoImport.disabled = true;
 
   try {
-    const res = await fetch(`/api/search/import-likes?url=${encodeURIComponent(url)}`);
+    const res = await fetch(endpoint);
     const data = await res.json();
 
     if (data.tracks && data.tracks.length > 0) {
-      importStatus.textContent = `Успех! Загружено треков: ${data.tracks.length}`;
+      importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
+      
       setTimeout(() => {
         importModal.classList.remove('active');
-        switchTab(navSearch, 'Мои лайки', false);
+        switchTab(navSearch, 'Импортированные треки', false);
         renderTracks(data.tracks);
         btnDoImport.disabled = false;
       }, 1500);
     } else {
       importStatus.style.color = '#ff4d4d';
-      importStatus.textContent = 'Лайки не найдены. Проверьте ссылку или откройте профиль.';
+      importStatus.textContent = data.error || 'Треки не найдены. Проверьте ссылку.';
       btnDoImport.disabled = false;
     }
   } catch (err) {
