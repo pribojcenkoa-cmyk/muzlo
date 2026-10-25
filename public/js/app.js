@@ -205,9 +205,9 @@ async function loadArtistPage(artistName) {
 }
 
 // ==========================================
-// 6. ПЛЕЕР (ИСПРАВЛЕНО ДЛЯ МОБИЛЬНЫХ)
+// 6. ПЛЕЕР (ГЛАВНОЕ ИСПРАВЛЕНИЕ ДЛЯ МОБИЛЬНЫХ)
 // ==========================================
-// Убрали async, чтобы play() срабатывал МГНОВЕННО при клике
+// Никаких async/await перед play()!
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -228,9 +228,8 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  // Устанавливаем ссылку и запускаем СРАЗУ
+  // МГНОВЕННО вызываем play()
   audioPlayer.src = getStreamUrl(track);
-  
   audioPlayer.play().then(() => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
@@ -241,7 +240,7 @@ function playTrack(track) {
     isPlaying = false;
   });
 
-  // А точную длительность запрашиваем В ФОНЕ, чтобы не блокировать запуск
+  // А длительность узнаем в фоне, чтобы не сбить play()
   if (track.permalink_url) {
     fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
       .then(r => r.json())
@@ -250,7 +249,7 @@ function playTrack(track) {
           currentTrackRealDuration = data.duration;
           totalTimeEl.textContent = formatTime(data.duration);
         }
-      }).catch(e => console.log('Длительность не получена'));
+      }).catch(e => {});
   }
 }
 
@@ -346,7 +345,7 @@ searchInput.addEventListener('input', (e) => {
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
   searchTimeout = setTimeout(async () => {
     try {
-      const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
+    const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
       renderTracks(data.tracks);
     } catch (err) {

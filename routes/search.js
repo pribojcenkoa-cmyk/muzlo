@@ -7,7 +7,6 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
-// ЗАПРОСЫ ДЛЯ ПОПУЛЯРНЫХ РЕПЕРОВ И ХИП-ХОПА
 const TRENDING_QUERIES = [
   'Travis Scott', 'Drake', 'Kendrick Lamar', 'J. Cole', 
   '21 Savage', 'Future', 'Playboi Carti', 'Metro Boomin', 
@@ -18,19 +17,14 @@ const TRENDING_QUERIES = [
 
 async function searchSoundCloud(query, offset = 0) {
   const searchResult = await scdl.search({
-    query: query,
-    resourceType: 'tracks',
-    limit: 50,
-    offset: offset
+    query: query, resourceType: 'tracks', limit: 50, offset: offset
   });
 
   return searchResult.collection
-    // Отсеиваем длинные сборники и миксы (оставляем только треки до 10 минут)
-    .filter(track => track.duration < 600000)
+    .filter(track => track.duration < 900000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
-
       const proxyCover = cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null;
 
       return {
@@ -46,22 +40,18 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
-// 1. Рекомендации (Случайный рэпер при каждом F5)
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
     const randomQuery = TRENDING_QUERIES[Math.floor(Math.random() * TRENDING_QUERIES.length)];
-    // Берем случайный отступ от 0 до 40, чтобы треки не повторялись
     const randomOffset = Math.floor(Math.random() * 4) * 10; 
     const tracks = await searchSoundCloud(randomQuery, randomOffset);
     res.json({ tracks });
   } catch (err) {
-    console.error('Ошибка рекомендаций:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// 2. Поиск
 router.get('/', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.json({ tracks: [] });
@@ -73,7 +63,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. Получение точной длительности
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -85,7 +74,6 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. Артист
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
@@ -97,7 +85,6 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Прокси для картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -111,15 +98,42 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// 6. Стриминг
+// СТРИМИНГ (ПРЯМАЯ ССЫЛКА ДЛЯ МОБИЛЬНЫХ)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
+
+    const info = await scdl.getInfo(trackUrl);
+    let directUrl = null;
+
+    // Ищем прямую ссылку на MP3
+    if (info.formats) {
+      const prog = info.formats.find(f => f.format.protocol === 'progressive');
+      if (prog) directUrl = prog.url;
+    }
+
+    if (!directUrl && info.media && info.media.transcodings) {
+      const trans = info.media.transcodings.find(t => t.format.protocol === 'progressive');
+      if (trans) {
+        const tRes = await axios.get(trans.url, { params: { client_id: scdl.client_id } });
+        directUrl = tRes.data.url;
+      }
+    }
+
+    // Если нашли прямую ссылку — перенаправляем браузер на SoundCloud
+    if (directUrl) {
+      return res.redirect(directUrl);
+    }
+
+    // Если нет, качаем потоком
     const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
     stream.pipe(res);
+
   } catch (err) {
+    console.error('Ошибка стриминга:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
