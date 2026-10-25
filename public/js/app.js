@@ -64,7 +64,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. РЕНДЕР ТРЕКОВ (С ЛАЙКАМИ И УДАЛЕНИЕМ)
+// 3. РЕНДЕР ТРЕКОВ
 // ==========================================
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
@@ -80,16 +80,16 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.className = 'track-item';
     div.dataset.index = index;
     
-    // Если мы в медиатеке — показываем крестик, иначе сердечко
     const actionBtnHTML = isLibrary 
       ? `<button class="btn-delete" title="Удалить из медиатеки">✕</button>` 
       : `<button class="btn-like" title="Сохранить в медиатеку">♥</button>`;
 
+    // Оборачиваем имя артиста в span с классом artist-link
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
       <div class="track-info">
         <div class="track-title">${track.title}</div>
-        <div class="track-artist">${track.artist_name || 'Неизвестен'}</div>
+        <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name}">${track.artist_name || 'Неизвестен'}</span></div>
       </div>
       <div class="track-duration">${formatTime(track.duration)}</div>
       ${actionBtnHTML}
@@ -101,9 +101,9 @@ function renderTracks(tracksArray, isLibrary = false) {
       this.src = '/img/default-cover.png';
     };
 
-    // Воспроизведение
+    // Воспроизведение при клике на трек
     div.addEventListener('click', (e) => {
-      if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete')) return; 
+      if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
@@ -113,7 +113,6 @@ function renderTracks(tracksArray, isLibrary = false) {
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
     
     if (isLibrary) {
-      // Удаление из медиатеки
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Удалить этот трек из медиатеки?')) return;
@@ -123,7 +122,6 @@ function renderTracks(tracksArray, isLibrary = false) {
         } catch (err) { console.error('Ошибка удаления:', err); }
       });
     } else {
-      // Добавление в медиатеку (Лайк)
       actionBtn.addEventListener('click', async () => {
         try {
           const streamUrl = getStreamUrl(track);
@@ -164,8 +162,55 @@ function renderTracks(tracksArray, isLibrary = false) {
   });
 }
 
+// Обработчик клика по имени артиста (делегирование событий)
+trackListEl.addEventListener('click', (e) => {
+  if (e.target.classList.contains('artist-link')) {
+    e.stopPropagation(); // Предотвращаем запуск трека
+    const artistName = e.target.dataset.artist;
+    loadArtistPage(artistName);
+  }
+});
+
 // ==========================================
-// 4. УПРАВЛЕНИЕ ПЛЕЕРОМ
+// 4. ЗАГРУЗКА СТРАНИЦЫ АРТИСТА
+// ==========================================
+async function loadArtistPage(artistName) {
+  if (!artistName || artistName === 'Неизвестен') return;
+  
+  // Сбрасываем активные вкладки
+  [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
+  pageTitle.textContent = `Артист: ${artistName}`;
+  searchContainer.style.display = 'none';
+  
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка треков артиста...</p>';
+  
+  try {
+    const res = await fetchWithTimeout(`/api/search/artist?name=${encodeURIComponent(artistName)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    
+    // Включаем кнопку "Назад", чтобы вернуться на главную
+    const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #333; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад на главную</button>`;
+    trackListEl.innerHTML = backBtnHTML;
+    
+    // Рендерим треки
+    const tempDiv = document.createElement('div');
+    renderTracks(data.tracks);
+    
+    // Перемещаем треки после кнопки "Назад"
+    const tracksHTML = trackListEl.innerHTML;
+    trackListEl.innerHTML = backBtnHTML + tracksHTML;
+    
+    // Обработчик для кнопки "Назад"
+    document.getElementById('btn-back-home').addEventListener('click', () => navHome.click());
+    
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки треков артиста.</p>';
+  }
+}
+
+// ==========================================
+// 5. УПРАВЛЕНИЕ ПЛЕЕРОМ
 // ==========================================
 async function playTrack(track) {
   playerTitle.textContent = track.title;
@@ -255,11 +300,11 @@ volumeSlider.addEventListener('input', () => {
 audioPlayer.addEventListener('ended', () => btnNext.click());
 
 // ==========================================
-// 5. НАВИГАЦИЯ
+// 6. НАВИГАЦИЯ
 // ==========================================
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
-  activeTab.classList.add('active');
+  if (activeTab) activeTab.classList.add('active');
   pageTitle.textContent = title;
   searchContainer.style.display = showSearch ? 'block' : 'none';
 }
@@ -317,14 +362,14 @@ navLibrary.addEventListener('click', async () => {
       return;
     }
     const data = await res.json();
-    renderTracks(data.tracks, true); // Передаем true, чтобы включить режим удаления
+    renderTracks(data.tracks, true);
   } catch (err) {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 });
 
 // ==========================================
-// 6. АВТОРИЗАЦИЯ
+// 7. АВТОРИЗАЦИЯ
 // ==========================================
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
@@ -394,5 +439,8 @@ async function checkAuth() {
   } catch (err) { }
 }
 
+// ==========================================
+// 8. СТАРТ
+// ==========================================
 checkAuth();
 navHome.click();
