@@ -1,14 +1,11 @@
-// ==========================================
-// 0. ОЧИСТКА СТАРОГО КЭША (ВЕРСИЯ 2.0)
-// ==========================================
-if (localStorage.getItem('muzlo_version') !== '2.0') {
-  localStorage.clear();
-  localStorage.setItem('muzlo_version', '2.0');
+// Очистка старого кэша (от битых VK/Audius треков)
+if (localStorage.getItem('muzlo_version') !== '4.0') {
+  localStorage.removeItem('muzlo_current_track');
+  localStorage.removeItem('muzlo_current_time');
+  localStorage.setItem('muzlo_version', '4.0');
 }
 
-// ==========================================
 // 1. ИНИЦИАЛИЗАЦИЯ
-// ==========================================
 const audioPlayer = document.getElementById('audio-player');
 const trackListEl = document.getElementById('track-list');
 const pageTitle = document.getElementById('page-title');
@@ -37,9 +34,7 @@ let isPlaying = false;
 let isLoginMode = true;
 let currentTrackRealDuration = 0;
 
-// ==========================================
 // 2. УТИЛИТЫ
-// ==========================================
 const formatTime = (seconds) => {
   if (!seconds || isNaN(seconds)) return '0:00';
   const min = Math.floor(seconds / 60);
@@ -50,8 +45,8 @@ const formatTime = (seconds) => {
 const getValidCover = (url) => url || '/img/default-cover.png';
 
 function getStreamUrl(track) {
-  if (track.stream_url) return track.stream_url; 
-  if (track.is_external && track.file_url) return track.file_url; 
+  if (track.stream_url) return track.stream_url;
+  if (track.file_url) return track.file_url;
   return `/api/tracks/${track.id}/stream`;
 }
 
@@ -68,9 +63,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   }
 }
 
-// ==========================================
 // 3. СОХРАНЕНИЕ ПЛЕЕРА
-// ==========================================
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -107,9 +100,7 @@ async function restorePlayerState() {
   } catch (e) {}
 }
 
-// ==========================================
 // 4. РЕНДЕР ТРЕКОВ
-// ==========================================
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
   trackListEl.innerHTML = '';
@@ -190,9 +181,7 @@ trackListEl.addEventListener('click', (e) => {
   }
 });
 
-// ==========================================
 // 5. СТРАНИЦА АРТИСТА
-// ==========================================
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
@@ -212,9 +201,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// ==========================================
-// 6. ПЛЕЕР
-// ==========================================
+// 6. ПЛЕЕР (без async - чтобы play() вызывался мгновенно)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -245,12 +232,19 @@ function playTrack(track) {
     console.error('Ошибка аудио:', err);
     btnPlay.textContent = '▶';
     isPlaying = false;
-
-    if (err.name === 'NotSupportedError' && currentTracks.length > 1) {
-      alert('Этот трек недоступен (битая ссылка). Включаем следующий...');
-      btnNext.click();
-    }
   });
+
+  // Точная длительность в фоне
+  if (track.permalink_url) {
+    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.duration) {
+          currentTrackRealDuration = data.duration;
+          totalTimeEl.textContent = formatTime(data.duration);
+        }
+      }).catch(e => {});
+  }
 }
 
 btnPlay.addEventListener('click', () => {
@@ -306,9 +300,7 @@ audioPlayer.addEventListener('ended', () => {
 
 window.addEventListener('beforeunload', savePlayerState);
 
-// ==========================================
 // 7. НАВИГАЦИЯ И АВТОРИЗАЦИЯ
-// ==========================================
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
@@ -427,9 +419,7 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// ==========================================
 // 8. СТАРТ
-// ==========================================
 checkAuth();
 restorePlayerState(); 
-navHome.click(); 
+navHome.click();
