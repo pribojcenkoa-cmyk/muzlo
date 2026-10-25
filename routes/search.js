@@ -98,57 +98,51 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// 6. ИДЕАЛЬНЫЙ СТРИМИНГ (С поддержкой Range для ПК и мобилок)
+// 6. УМНЫЙ СТРИМИНГ (Прокси с Range -> Фоллбек на скачивание)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
-    if (!trackUrl) throw new Error('Ссылка не передана');
+    if (!trackUrl) return res.status(400).send('URL не передан');
 
-    const info = await scdl.getInfo(trackUrl);
-    let directUrl = null;
-
-    // Ищем прямую ссылку на MP3
-    if (info.formats) {
-      const prog = info.formats.find(f => f.format.protocol === 'progressive');
-      if (prog) directUrl = prog.url;
-    }
-
-    if (!directUrl && info.media && info.media.transcodings) {
-      const trans = info.media.transcodings.find(t => t.format.protocol === 'progressive');
-      if (trans) {
-        const tRes = await axios.get(trans.url, { params: { client_id: scdl.client_id } });
-        directUrl = tRes.data.url;
+    // Попытка 1: Получить прямую ссылку и проксировать (лучше для мобилок)
+    try {
+      const info = await scdl.getInfo(trackUrl);
+      let directUrl = null;
+      
+      if (info.formats) {
+        const prog = info.formats.find(f => f.format.protocol === 'progressive');
+        if (prog) directUrl = prog.url;
       }
+      
+      if (directUrl) {
+        const headers = { 'User-Agent': 'Mozilla/5.0' };
+        if (req.headers.range) headers['Range'] = req.headers.range;
+        
+        const response = await axios.get(directUrl, {
+          responseType: 'stream',
+          headers: headers,
+          validateStatus: status => status >= 200 && status < 400
+        });
+        
+        res.status(response.status);
+        if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+        if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+        if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        
+        return response.data.pipe(res);
+      }
+    } catch (err) {
+      console.log('Прямое проксирование не удалось, используем scdl.download');
     }
 
-    if (!directUrl) throw new Error('Прямая ссылка не найдена');
-
-    // Передаем заголовок Range от браузера к SoundCloud
-    const headers = { 'User-Agent': 'Mozilla/5.0' };
-    if (req.headers.range) {
-      headers['Range'] = req.headers.range;
-    }
-
-    // Запрашиваем аудио как поток
-    const response = await axios({
-      method: 'get',
-      url: directUrl,
-      responseType: 'stream',
-      headers: headers,
-      validateStatus: status => status >= 200 && status < 400
-    });
-
-    // Копируем ВСЕ важные заголовки для браузера (это чинит мобилки)
-    res.status(response.status);
-    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
-    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+    // Попытка 2 (Фоллбек): Прямое скачивание (работает для всех треков на ПК)
+    const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
+    stream.pipe(res);
 
-    // Отдаем поток
-    response.data.pipe(res);
   } catch (err) {
-    console.error('Ошибка стриминга:', err.message);
+    console.error('Фатальная ошибка стриминга:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
