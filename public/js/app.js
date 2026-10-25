@@ -1,10 +1,3 @@
-// Очистка старого кэша
-if (localStorage.getItem('muzlo_version') !== '9.0') {
-  localStorage.removeItem('muzlo_current_track');
-  localStorage.removeItem('muzlo_current_time');
-  localStorage.setItem('muzlo_version', '9.0');
-}
-
 // 1. ИНИЦИАЛИЗАЦИЯ
 const audioPlayer = document.getElementById('audio-player');
 const trackListEl = document.getElementById('track-list');
@@ -14,6 +7,7 @@ const searchInput = document.getElementById('search-input');
 const navHome = document.getElementById('nav-home');
 const navSearch = document.getElementById('nav-search');
 const navLibrary = document.getElementById('nav-library');
+const navWave = document.getElementById('nav-wave');
 const btnPlay = document.getElementById('btn-play');
 const btnNext = document.getElementById('btn-next');
 const btnPrev = document.getElementById('btn-prev');
@@ -28,7 +22,6 @@ const authModal = document.getElementById('auth-modal');
 const authForm = document.getElementById('auth-form');
 const authContainer = document.getElementById('auth-container');
 
-// Элементы импорта
 const importBtn = document.getElementById('import-btn');
 const importModal = document.getElementById('import-modal');
 const btnCloseImport = document.getElementById('btn-close-import');
@@ -97,7 +90,7 @@ async function performSearch(query) {
   }
 }
 
-// 3. СОХРАНЕНИЕ ПЛЕЕРА
+// 3. ПЛЕЕР (Сохранение)
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -134,7 +127,7 @@ async function restorePlayerState() {
   } catch (e) {}
 }
 
-// 4. РЕНДЕР ТРЕКОВ
+// 4. РЕНДЕР
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
   trackListEl.innerHTML = '';
@@ -149,12 +142,9 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.dataset.index = index;
     
     const isLiked = userLikedTrackIds.has(String(track.id));
-    let actionBtnHTML = '';
-    if (isLibrary) {
-      actionBtnHTML = `<button class="btn-delete" title="Удалить">✕</button>`;
-    } else {
-      actionBtnHTML = `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
-    }
+    let actionBtnHTML = isLibrary 
+      ? `<button class="btn-delete" title="Удалить">✕</button>`
+      : `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
 
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
@@ -229,10 +219,10 @@ trackListEl.addEventListener('click', (e) => {
   }
 });
 
-// 5. СТРАНИЦА АРТИСТА
+// 5. АРТИСТ
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
-  [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
+  [navHome, navSearch, navLibrary, navWave].forEach(el => el.classList.remove('active'));
   pageTitle.textContent = `Артист: ${artistName}`;
   searchContainer.style.display = 'none';
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
@@ -249,7 +239,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ПЛЕЕР
+// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -321,9 +311,7 @@ btnPrev.addEventListener('click', () => {
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
-  if (!isSeeking) {
-    seekSlider.value = (audioPlayer.currentTime / duration) * 100;
-  }
+  if (!isSeeking) seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
   if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
@@ -336,16 +324,14 @@ seekSlider.addEventListener('input', () => {
   isSeeking = true;
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration) return;
-  const previewTime = (seekSlider.value / 100) * duration;
-  currentTimeEl.textContent = formatTime(previewTime);
+  currentTimeEl.textContent = formatTime((seekSlider.value / 100) * duration);
 });
 
 seekSlider.addEventListener('change', () => {
   isSeeking = false;
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration) return;
-  const seekTime = (seekSlider.value / 100) * duration;
-  audioPlayer.currentTime = seekTime;
+  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
   savePlayerState();
 });
 
@@ -359,9 +345,9 @@ audioPlayer.addEventListener('ended', () => {
 
 window.addEventListener('beforeunload', savePlayerState);
 
-// 7. НАВИГАЦИЯ И АВТОРИЗАЦИЯ
+// 7. НАВИГАЦИЯ
 function switchTab(activeTab, title, showSearch = false) {
-  [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
+  [navHome, navSearch, navLibrary, navWave].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
   pageTitle.textContent = title;
   searchContainer.style.display = showSearch ? 'block' : 'none';
@@ -380,11 +366,31 @@ navHome.addEventListener('click', async () => {
   }
 });
 
+navWave.addEventListener('click', async () => {
+  switchTab(navWave, 'Моя волна');
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Слушаем ваши вкусы...</p>';
+  await loadUserLikes();
+  try {
+    const res = await fetch('/api/search/my-wave');
+    if (res.status === 401) {
+      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
+      return;
+    }
+    const data = await res.json();
+    if (data.error) {
+      trackListEl.innerHTML = `<p style="color:red; text-align:center; margin-top:40px;">${data.error}</p>`;
+      return;
+    }
+    renderTracks(data.tracks);
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки волны.</p>';
+  }
+});
+
 navSearch.addEventListener('click', async () => {
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
   await loadUserLikes();
-
   if (lastSearchQuery) {
     searchInput.value = lastSearchQuery;
     performSearch(lastSearchQuery);
@@ -398,15 +404,12 @@ searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const query = e.target.value.trim();
   lastSearchQuery = query; 
-  
   if (query.length < 2) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
     return;
   }
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
-  searchTimeout = setTimeout(() => {
-    performSearch(query);
-  }, 600);
+  searchTimeout = setTimeout(() => performSearch(query), 600);
 });
 
 navLibrary.addEventListener('click', async () => {
@@ -425,6 +428,7 @@ navLibrary.addEventListener('click', async () => {
   }
 });
 
+// 8. АВТОРИЗАЦИЯ
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
   if (e.target.id === 'btn-logout') logout();
@@ -484,9 +488,7 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// ==========================================
-// 9. ИМПОРТ ЛАЙКОВ SOUNDCLOUD
-// ==========================================
+// 9. ИМПОРТ
 if (importBtn) {
   importBtn.addEventListener('click', () => {
     importModal.classList.add('active');
@@ -496,9 +498,7 @@ if (importBtn) {
 }
 
 btnCloseImport.addEventListener('click', () => importModal.classList.remove('active'));
-importModal.addEventListener('click', (e) => {
-  if (e.target === importModal) importModal.classList.remove('active');
-});
+importModal.addEventListener('click', (e) => { if (e.target === importModal) importModal.classList.remove('active'); });
 
 btnDoImport.addEventListener('click', async () => {
   const url = importUrlInput.value.trim();
@@ -518,7 +518,6 @@ btnDoImport.addEventListener('click', async () => {
 
     if (data.tracks && data.tracks.length > 0) {
       importStatus.textContent = `Успех! Загружено треков: ${data.tracks.length}`;
-      
       setTimeout(() => {
         importModal.classList.remove('active');
         switchTab(navSearch, 'Мои лайки', false);

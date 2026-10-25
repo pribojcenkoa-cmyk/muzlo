@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import axios from 'axios';
 import { createRequire } from 'module';
+import { query } from '../db/pool.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const require = createRequire(import.meta.url);
 const scdl = require('soundcloud-downloader').default;
@@ -60,10 +62,10 @@ router.get('/trending', async (req, res) => {
 
 // 2. Поиск
 router.get('/', async (req, res) => {
-  const query = req.query.q;
-  if (!query) return res.json({ tracks: [] });
+  const q = req.query.q;
+  if (!q) return res.json({ tracks: [] });
   try {
-    const tracks = await searchSoundCloud(query);
+    const tracks = await searchSoundCloud(q);
     res.json({ tracks });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка поиска' });
@@ -99,26 +101,40 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. ЗАГРУЗКА ЛАЙКОВ ПОЛЬЗОВАТЕЛЯ (Медиатека SoundCloud)
+// 5. МОЯ ВОЛНА (Умный рандом по лайкам)
+router.get('/my-wave', requireAuth, async (req, res) => {
+  try {
+    const liked = await query(
+      'SELECT artist_name FROM user_library WHERE user_id = $1 ORDER BY RANDOM() LIMIT 3',
+      [req.user.id]
+    );
+
+    if (liked.rows.length === 0) {
+      return res.status(400).json({ error: 'Добавьте треки в медиатеку, чтобы мы поняли ваши вкусы!' });
+    }
+
+    const randomArtist = liked.rows[0].artist_name;
+    const tracks = await searchSoundCloud(randomArtist);
+    const shuffled = tracks.sort(() => 0.5 - Math.random()).slice(0, 20);
+    res.json({ tracks: shuffled });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка генерации волны' });
+  }
+});
+
+// 6. Импорт лайков SoundCloud
 router.get('/import-likes', async (req, res) => {
   let profileUrl = req.query.url;
-  if (!profileUrl) return res.status(400).json({ error: 'Ссылка на профиль не передана' });
+  if (!profileUrl) return res.status(400).json({ error: 'Ссылка не передана' });
 
-  // Нормализуем ссылку (убираем лишние слэши)
   profileUrl = profileUrl.replace(/\/$/, '');
 
   try {
-    // Идем на страницу лайков пользователя
     const likesUrl = `${profileUrl}/likes`;
-    console.log(`[Import] Загружаем лайки с: ${likesUrl}`);
-
-    const likesResult = await scdl.getTracks({
-      url: likesUrl,
-      limit: 100 // Загружаем до 100 лайков
-    });
+    const likesResult = await scdl.getTracks({ url: likesUrl, limit: 100 });
 
     if (!likesResult.collection || likesResult.collection.length === 0) {
-      return res.json({ tracks: [], message: 'Лайки не найдены или профиль закрыт' });
+      return res.json({ tracks: [], message: 'Лайки не найдены' });
     }
 
     const tracks = likesResult.collection
@@ -142,12 +158,11 @@ router.get('/import-likes', async (req, res) => {
 
     res.json({ tracks });
   } catch (err) {
-    console.error('Ошибка импорта лайков:', err.message);
-    res.status(500).json({ error: 'Не удалось загрузить лайки. Возможно, профиль закрыт или ссылка неверная.' });
+    res.status(500).json({ error: 'Ошибка импорта' });
   }
 });
 
-// 6. Прокси картинок
+// 7. Прокси картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -161,7 +176,7 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// 7. Стриминг
+// 8. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;

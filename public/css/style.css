@@ -32,7 +32,7 @@ body {
 }
 
 /* ==========================================
-   БОКОВАЯ ПАНЕЛЬ (DESKTOP)
+   БОКОВАЯ ПАНЕЛЬ
    ========================================== */
 .sidebar {
   background-color: var(--bg-sidebar);
@@ -43,7 +43,6 @@ body {
   overflow-y: auto;
 }
 
-/* Логотип и Discord */
 .logo-wrapper {
   display: flex;
   align-items: center;
@@ -80,7 +79,6 @@ body {
   100% { transform: translateY(0px); }
 }
 
-/* Блок авторизации */
 .auth-container {
   display: flex;
   align-items: center;
@@ -102,10 +100,7 @@ body {
   transition: all 0.2s;
 }
 
-.sidebar .btn-auth:hover {
-  background-color: var(--text-main);
-  color: #000;
-}
+.sidebar .btn-auth:hover { background-color: var(--text-main); color: #000; }
 
 .sidebar .profile-info {
   display: flex;
@@ -117,47 +112,15 @@ body {
   background-color: #1a1a1a;
   border: 1px solid #333;
 }
-.sidebar .profile-info span {
-  margin-bottom: 8px;
-  font-size: 13px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sidebar .btn-logout {
-  padding: 6px;
-  background: #282828;
-  border-radius: 4px;
-  width: 100%;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
+.sidebar .profile-info span { margin-bottom: 8px; font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar .btn-logout { padding: 6px; background: #282828; border-radius: 4px; width: 100%; border: none; color: var(--text-muted); cursor: pointer; }
 .sidebar .btn-logout:hover { color: #ff4d4d; }
 
-/* Навигация */
-.sidebar nav ul {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.sidebar nav li {
-  padding: 12px 16px;
-  color: var(--text-muted);
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-  border-radius: 8px;
-  transition: color 0.2s, background-color 0.2s;
-}
-
+.sidebar nav ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.sidebar nav li { padding: 12px 16px; color: var(--text-muted); font-weight: 600; font-size: 15px; cursor: pointer; border-radius: 8px; transition: color 0.2s, background-color 0.2s; }
 .sidebar nav li:hover { color: var(--text-main); }
 .sidebar nav li.active { background-color: var(--bg-hover); color: var(--text-main); }
 
-/* Кнопка ИМПОРТА SoundCloud */
 #import-btn {
   width: calc(100% - 16px);
   margin: 15px 8px 0 8px;
@@ -172,14 +135,10 @@ body {
   transition: background-color 0.2s, transform 0.2s;
   text-align: center;
 }
-
-#import-btn:hover {
-  background-color: #e64a00;
-  transform: scale(1.02);
-}
+#import-btn:hover { background-color: #e64a00; transform: scale(1.02); }
 
 /* ==========================================
-   ОСНОВНОЙ КОНТЕНТ
+   КОНТЕНТ
    ========================================== */
 .content {
   background: linear-gradient(to bottom, #1f1f1f, var(--bg-main));
@@ -190,93 +149,24 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-.content-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-  gap: 15px;
-}
-
+.content-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 15px; }
 .content-header h1 { font-size: 32px; font-weight: 700; }
-
-.search-box input {
-  background-color: #242424;
-  border: none;
-  border-radius: 20px;
-  padding: 10px 20px;
-  color: var(--text-main);
-  font-size: 14px;
-  width: 300px;
-  outline: none;
-  transition: background-color 0.2s, box-shadow 0.2s;
-}
+.search-box input { background-color: #242424; border: none; border-radius: 20px; padding: 10px 20px; color: var(--text-main); font-size: 14px; width: 300px; outline: none; transition: background-color 0.2s, box-shadow 0.2s; }
 .search-box input:focus { background-color: #2a2a2a; box-shadow: 0 0 0 2px var(--text-main); }
 
-/* ==========================================
-   СПИСОК ТРЕКОВ
-   ========================================== */
 .track-list { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-
-.track-item {
-  display: flex;
-  align-items: center;
-  padding: 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  width: 100%;
-  box-sizing: border-box;
-}
-
+.track-item { display: flex; align-items: center; padding: 10px; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; width: 100%; box-sizing: border-box; }
 .track-item:hover { background-color: var(--bg-hover); }
 .track-item.active { background-color: #1a3a24; }
-
-.track-cover {
-  width: 48px;
-  height: 48px;
-  border-radius: 4px;
-  object-fit: cover;
-  background-color: #333;
-  margin-right: 16px;
-  flex-shrink: 0;
-}
-
+.track-cover { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; background-color: #333; margin-right: 16px; flex-shrink: 0; }
 .track-info { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-
-.track-title {
-  font-size: 16px;
-  font-weight: 500;
-  margin-bottom: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.track-artist {
-  font-size: 13px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+.track-title { font-size: 16px; font-weight: 500; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track-artist { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .artist-link { cursor: pointer; transition: color 0.2s, text-decoration 0.2s; }
 .artist-link:hover { color: var(--text-main); text-decoration: underline; }
-
 .track-duration { color: var(--text-muted); font-size: 14px; margin-right: 20px; flex-shrink: 0; }
 
-.btn-like, .btn-delete {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 20px;
-  cursor: pointer;
-  padding: 0 10px;
-  flex-shrink: 0;
-  transition: transform 0.2s, color 0.2s;
-}
+.btn-like, .btn-delete { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 0 10px; flex-shrink: 0; transition: transform 0.2s, color 0.2s; }
 .btn-like:hover { color: var(--text-main); transform: scale(1.2); }
 .btn-like.liked { color: #ff4d4d; }
 .btn-delete:hover { color: #ff4d4d; transform: scale(1.2); }
@@ -284,141 +174,53 @@ body {
 /* ==========================================
    ПЛЕЕР (DESKTOP)
    ========================================== */
-.player {
-  background-color: var(--bg-surface);
-  border-top: 1px solid var(--border-color);
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 60px 0 16px;
-  height: 90px;
-}
-
+.player { background-color: var(--bg-surface); border-top: 1px solid var(--border-color); grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 60px 0 16px; height: 90px; }
 .player.hidden { display: none !important; }
 body:has(.player.hidden) { grid-template-rows: 1fr; }
-
 .player-track-info { display: flex; align-items: center; width: 30%; min-width: 0; }
-
-.player-cover {
-  width: 56px;
-  height: 56px;
-  border-radius: 4px;
-  object-fit: cover;
-  margin-right: 12px;
-  flex-shrink: 0;
-}
+.player-cover { width: 56px; height: 56px; border-radius: 4px; object-fit: cover; margin-right: 12px; flex-shrink: 0; }
 .player-cover.hidden { display: none; }
-
 .player-text { min-width: 0; }
 .player-title { font-size: 14px; font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .player-artist { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
 .player-controls { display: flex; flex-direction: column; align-items: center; width: 40%; }
-
 .player-buttons { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
-
-.control-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 16px;
-  cursor: pointer;
-  transition: color 0.2s;
-}
+.control-btn { background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; transition: color 0.2s; }
 .control-btn:hover { color: var(--text-main); }
-
-.play-btn {
-  background-color: var(--text-main);
-  color: #000;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
+.play-btn { background-color: var(--text-main); color: #000; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
 .play-btn:hover { transform: scale(1.05); }
-
 .player-progress { display: flex; align-items: center; width: 100%; gap: 8px; font-size: 12px; color: var(--text-muted); }
-
 input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: #4d4d4d; border-radius: 2px; cursor: pointer; }
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--text-main); border-radius: 50%; opacity: 0; transition: opacity 0.2s; }
 input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
-
 .player-volume { display: flex; align-items: center; gap: 8px; width: 30%; justify-content: flex-end; }
 .player-volume input { width: 100px; }
 
 /* ==========================================
    МОДАЛЬНЫЕ ОКНА
    ========================================== */
-.modal {
-  display: none;
-  position: fixed;
-  top: 0; left: 0; width: 100%; height: 100%;
-  background-color: rgba(0, 0, 0, 0.8);
-  z-index: 1000;
-  justify-content: center;
-  align-items: center;
-}
+.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.8); z-index: 1000; justify-content: center; align-items: center; }
 .modal.active { display: flex; }
-
-.modal-content {
-  background-color: var(--bg-surface);
-  padding: 40px;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 420px;
-  position: relative;
-  text-align: center;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-}
-
+.modal-content { background-color: var(--bg-surface); padding: 40px; border-radius: 12px; width: 100%; max-width: 420px; position: relative; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .close-btn { position: absolute; top: 15px; right: 20px; font-size: 28px; cursor: pointer; color: var(--text-muted); }
 .close-btn:hover { color: var(--text-main); }
-
 .modal-content h2 { margin-bottom: 24px; font-size: 24px; }
-
-.modal-content input {
-  width: 100%;
-  padding: 12px;
-  margin-bottom: 16px;
-  background-color: var(--bg-main);
-  border: 1px solid #333;
-  border-radius: 4px;
-  color: var(--text-main);
-  font-size: 16px;
-  outline: none;
-}
+.modal-content input { width: 100%; padding: 12px; margin-bottom: 16px; background-color: var(--bg-main); border: 1px solid #333; border-radius: 4px; color: var(--text-main); font-size: 16px; outline: none; }
 .modal-content input:focus { border-color: var(--accent); }
-
-.btn-submit {
-  width: 100%;
-  padding: 14px;
-  background-color: var(--accent);
-  color: #000;
-  border: none;
-  border-radius: 24px;
-  font-weight: bold;
-  font-size: 16px;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
+.btn-submit { width: 100%; padding: 14px; background-color: var(--accent); color: #000; border: none; border-radius: 24px; font-weight: bold; font-size: 16px; cursor: pointer; transition: transform 0.2s; }
 .btn-submit:hover { transform: scale(1.02); }
 .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
 .toggle-auth { margin-top: 20px; font-size: 14px; color: var(--text-muted); }
 .toggle-auth a { color: var(--text-main); text-decoration: underline; }
 
 /* ==========================================
-   МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px) - ИСПРАВЛЕНО
+   МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px)
    ========================================== */
 @media (max-width: 768px) {
   body {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr; /* Контент занимает всё место */
+    grid-template-rows: auto 1fr;
     height: 100vh;
     overflow: hidden;
     padding-bottom: 0;
@@ -427,7 +229,6 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     overflow-x: hidden;
   }
 
-  /* --- ШАПКА --- */
   .sidebar {
     display: flex;
     flex-direction: row;
@@ -453,54 +254,35 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .sidebar .profile-info span { margin-bottom: 0; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sidebar .btn-logout { width: auto; background: none; padding: 0; }
 
-  /* --- НАВИГАЦИЯ --- */
   .sidebar nav { order: 3; width: 100%; margin-top: 5px; }
-  .sidebar nav ul {
-    display: flex;
-    flex-direction: row;
-    gap: 6px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    scrollbar-width: none;
-  }
+  .sidebar nav ul { display: flex; flex-direction: row; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
   .sidebar nav ul::-webkit-scrollbar { display: none; }
-  .sidebar nav li {
-    padding: 6px 14px;
-    white-space: nowrap;
-    font-size: 13px;
-    background-color: #242424;
-    border-radius: 20px;
-    color: var(--text-muted);
-  }
+  .sidebar nav li { padding: 6px 14px; white-space: nowrap; font-size: 13px; background-color: #242424; border-radius: 20px; color: var(--text-muted); }
   .sidebar nav li.active { background-color: var(--accent); color: #000; font-weight: bold; }
 
-  /* Кнопка импорта на мобилке */
   #import-btn {
     order: 4;
-    width: 100%;
-    margin: 10px 0 0 0;
-    padding: 8px;
+    width: auto;
+    margin: 5px 0 0 8px;
+    padding: 6px 12px;
     font-size: 12px;
-    border-radius: 6px;
+    border-radius: 20px;
   }
 
-  /* --- КОНТЕНТ --- */
   .content {
     padding: 15px;
     overflow-y: auto;
     overflow-x: hidden;
     width: 100%;
     max-width: 100vw;
-    padding-bottom: 80px; /* Оставляем место для плеера снизу */
+    padding-bottom: 80px;
   }
 
   .content-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 15px; width: 100%; }
   .content-header h1 { font-size: 22px; }
-  
   .search-box { width: 100%; margin-top: 5px; }
   .search-box input { width: 100%; padding: 10px 15px; font-size: 14px; box-sizing: border-box; }
 
-  /* --- СПИСОК ТРЕКОВ --- */
   .track-item { padding: 8px; gap: 8px; border-radius: 6px; max-width: 100%; overflow: hidden; }
   .track-cover { width: 45px; height: 45px; border-radius: 4px; flex-shrink: 0; }
   .track-info { flex: 1; min-width: 0; }
@@ -509,7 +291,6 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .track-duration { display: none; }
   .btn-like, .btn-delete { font-size: 18px; padding: 0 4px; flex-shrink: 0; }
 
-  /* --- ПЛЕЕР (ВЫЕЗЖАЕТ СНИЗУ) --- */
   .player {
     position: fixed;
     bottom: 0;
@@ -529,26 +310,15 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     transition: transform 0.3s ease;
   }
 
-  /* Когда убираем класс hidden, плеер выезжает вверх */
-  .player:not(.hidden) {
-    transform: translateY(0);
-  }
-
-  /* Если плеер скрыт (без класса active), он просто уезжает вниз */
-  .player.hidden {
-    display: flex !important; /* Оставляем flex, но уводим вниз */
-    transform: translateY(100%);
-  }
+  .player:not(.hidden) { transform: translateY(0); }
+  .player.hidden { display: flex !important; transform: translateY(100%); }
 
   .player-track-info { width: auto; flex: 1; justify-content: flex-start; text-align: left; overflow: hidden; min-width: 0; }
   .player-cover { width: 40px; height: 40px; margin-right: 10px; flex-shrink: 0; }
   .player-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .player-artist { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
   .player-controls { width: auto; flex-direction: row; align-items: center; gap: 15px; flex-shrink: 0; }
-  
   .player-progress, .player-volume { display: none; }
-
   .player-buttons { margin-bottom: 0; gap: 12px; }
   .control-btn { font-size: 18px; }
   .play-btn { width: 36px; height: 36px; font-size: 16px; }

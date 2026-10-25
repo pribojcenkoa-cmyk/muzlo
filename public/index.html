@@ -9,9 +9,8 @@
 </head>
 <body>
 
-  <!-- Боковая панель (Левое меню) -->
+  <!-- Боковая панель -->
   <aside class="sidebar">
-    <!-- Логотип и иконка Discord -->
     <div class="logo-wrapper">
       <div class="logo">Muzlo.</div>
       <a href="https://discord.gg/XyemcssNu" target="_blank" class="discord-icon" title="Наш Discord">
@@ -21,21 +20,19 @@
       </a>
     </div>
 
-    <!-- Блок авторизации -->
     <div id="auth-container" class="auth-container">
       <button class="btn-auth" id="btn-open-auth">Войти</button>
     </div>
     
-    <!-- Навигация -->
     <nav>
       <ul>
         <li id="nav-home" class="active">Главная</li>
+        <li id="nav-wave">Моя волна</li>
         <li id="nav-search">Поиск</li>
         <li id="nav-library">Моя медиатека</li>
       </ul>
     </nav>
 
-    <!-- Кнопка ИМПОРТА (теперь на своем месте в HTML) -->
     <button id="import-btn" class="btn-import">Загрузить мои лайки</button>
   </aside>
 
@@ -43,18 +40,14 @@
   <main class="content">
     <header class="content-header">
       <h1 id="page-title">Все треки</h1>
-      
-      <!-- Строка поиска -->
       <div class="search-box" id="search-container" style="display: none;">
         <input type="text" id="search-input" placeholder="Что послушаем?">
       </div>
     </header>
-    
-    <!-- Контейнер для списка треков -->
     <div class="track-list" id="track-list"></div>
   </main>
 
-  <!-- Нижний плеер (скрыт по умолчанию) -->
+  <!-- Плеер -->
   <div class="player hidden">
     <div class="player-track-info">
       <img id="player-cover" src="" alt="Cover" class="player-cover hidden">
@@ -83,7 +76,6 @@
     </div>
   </div>
 
-  <!-- Скрытый аудио-тег -->
   <audio id="audio-player"></audio>
 
   <!-- Модальное окно авторизации -->
@@ -91,14 +83,11 @@
     <div class="modal-content">
       <span class="close-btn" id="btn-close-auth">&times;</span>
       <h2 id="modal-title">Вход</h2>
-      
       <form id="auth-form">
         <input type="email" id="auth-email" placeholder="Email" required>
         <input type="password" id="auth-password" placeholder="Пароль (мин. 6 символов)" required>
-        
         <button type="submit" class="btn-submit" id="btn-submit-auth">Войти</button>
       </form>
-      
       <p class="toggle-auth">
         <span id="auth-toggle-text">Нет аккаунта?</span> 
         <a href="#" id="btn-toggle-auth">Зарегистрироваться</a>
@@ -106,7 +95,7 @@
     </div>
   </div>
 
-  <!-- Модальное окно ИМПОРТА ИЗ SOUNDCLOUD -->
+  <!-- Модальное окно импорта -->
   <div class="modal" id="import-modal">
     <div class="modal-content">
       <span class="close-btn" id="btn-close-import">&times;</span>
@@ -115,22 +104,19 @@
       <div style="text-align: left; background: #242424; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #b3b3b3;">
         <p style="margin-bottom: 10px; color: #fff; font-weight: bold;">Как это работает?</p>
         <ol style="margin-left: 20px; display: flex; flex-direction: column; gap: 8px;">
-          <li>Зайдите на ваш профиль в SoundCloud (soundcloud.com).</li>
-          <li>Скопируйте ссылку из адресной строки браузера. <br><span style="color:#1db954; font-size: 12px;">Она выглядит так: https://soundcloud.com/ваш_ник</span></li>
+          <li>Зайдите на ваш профиль в SoundCloud.</li>
+          <li>Скопируйте ссылку из адресной строки. <br><span style="color:#1db954; font-size: 12px;">https://soundcloud.com/ваш_ник</span></li>
           <li>Вставьте её в поле ниже и нажмите «Загрузить».</li>
         </ol>
-        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Работает только если ваш профиль открыт для просмотра (публичный).</p>
+        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Профиль должен быть открытым.</p>
       </div>
       
       <input type="text" id="import-url" placeholder="https://soundcloud.com/ваш_ник">
-      
       <button type="button" class="btn-submit" id="btn-do-import">Загрузить</button>
-      
       <div id="import-status" style="margin-top: 15px; font-size: 14px;"></div>
     </div>
   </div>
 
-  <!-- Подключение скриптов -->
   <script src="/js/app.js"></script>
 </body>
 </html>
