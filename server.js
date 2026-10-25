@@ -51,6 +51,9 @@ app.get('/api/health', async (req, res) => {
 app.use((req, res) => res.status(404).json({ error: 'Маршрут не найден' }));
 
 // Запуск
-app.listen(PORT, () => {
+app.listen(PORT, () => {console.log('=== ДИАГНОСТИКА ===');
+console.log('JWT_SECRET виден серверу:', process.env.JWT_SECRET ? 'ДА' : 'НЕТ');
+console.log('Длина ключа:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 0);
+console.log('===================');
   console.log(`Сервер запущен: http://localhost:${PORT}`);
 });
