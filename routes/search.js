@@ -98,7 +98,7 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// СТРИМИНГ (ПРЯМАЯ ССЫЛКА ДЛЯ МОБИЛЬНЫХ)
+// 6. СТРИМИНГ (Скачиваем в память, мобилки это 100% понимают)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -107,7 +107,6 @@ router.get('/stream', async (req, res) => {
     const info = await scdl.getInfo(trackUrl);
     let directUrl = null;
 
-    // Ищем прямую ссылку на MP3
     if (info.formats) {
       const prog = info.formats.find(f => f.format.protocol === 'progressive');
       if (prog) directUrl = prog.url;
@@ -121,16 +120,21 @@ router.get('/stream', async (req, res) => {
       }
     }
 
-    // Если нашли прямую ссылку — перенаправляем браузер на SoundCloud
-    if (directUrl) {
-      return res.redirect(directUrl);
-    }
+    if (!directUrl) throw new Error('Прямая ссылка не найдена');
 
-    // Если нет, качаем потоком
-    const stream = await scdl.download(trackUrl);
+    // Скачиваем весь файл целиком
+    const audioRes = await axios.get(directUrl, { 
+      responseType: 'arraybuffer',
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const buffer = Buffer.from(audioRes.data);
+    
+    // Отдаем как обычный MP3 файл
     res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', buffer.length);
     res.setHeader('Accept-Ranges', 'bytes');
-    stream.pipe(res);
+    res.send(buffer);
 
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);

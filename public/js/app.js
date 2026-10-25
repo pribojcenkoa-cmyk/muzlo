@@ -207,7 +207,6 @@ async function loadArtistPage(artistName) {
 // ==========================================
 // 6. ПЛЕЕР (ГЛАВНОЕ ИСПРАВЛЕНИЕ ДЛЯ МОБИЛЬНЫХ)
 // ==========================================
-// Никаких async/await перед play()!
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -228,7 +227,7 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  // МГНОВЕННО вызываем play()
+  // Мгновенно вызываем play() без ожидания запросов
   audioPlayer.src = getStreamUrl(track);
   audioPlayer.play().then(() => {
     isPlaying = true;
@@ -240,7 +239,7 @@ function playTrack(track) {
     isPlaying = false;
   });
 
-  // А длительность узнаем в фоне, чтобы не сбить play()
+  // В фоне уточняем длительность
   if (track.permalink_url) {
     fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
       .then(r => r.json())
