@@ -1,8 +1,8 @@
 // Очистка старого кэша
-if (localStorage.getItem('muzlo_version') !== '6.0') {
+if (localStorage.getItem('muzlo_version') !== '7.0') {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
-  localStorage.setItem('muzlo_version', '6.0');
+  localStorage.setItem('muzlo_version', '7.0');
 }
 
 // 1. ИНИЦИАЛИЗАЦИЯ
@@ -34,7 +34,8 @@ let isPlaying = false;
 let isLoginMode = true;
 let currentTrackRealDuration = 0;
 let isSeeking = false;
-let lastSearchQuery = ''; // Запоминаем последний поиск
+let lastSearchQuery = ''; 
+let userLikedTrackIds = new Set(); // Храним ID всех лайкнутых треков
 
 // 2. УТИЛИТЫ
 const formatTime = (seconds) => {
@@ -65,7 +66,20 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   }
 }
 
-// Функция выполнения поиска (вынесена отдельно, чтобы использовать в разных местах)
+// ФУНКЦИЯ ЗАГРУЗКИ ЛАЙКОВ (Синхронизация с БД)
+async function loadUserLikes() {
+  try {
+    const res = await fetch('/api/library');
+    if (res.ok) {
+      const data = await res.json();
+      // Записываем ID всех треков из медиатеки в Set
+      userLikedTrackIds = new Set(data.tracks.map(t => String(t.id)));
+    }
+  } catch (err) {
+    console.log('Не удалось загрузить лайки (возможно, не авторизован)');
+  }
+}
+
 async function performSearch(query) {
   if (!query || query.length < 2) return;
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
@@ -129,9 +143,17 @@ function renderTracks(tracksArray, isLibrary = false) {
     const div = document.createElement('div');
     div.className = 'track-item';
     div.dataset.index = index;
-    const actionBtnHTML = isLibrary 
-      ? `<button class="btn-delete" title="Удалить">✕</button>` 
-      : `<button class="btn-like" title="Сохранить">♥</button>`;
+    
+    // Проверяем, лайкнут ли уже трек
+    const isLiked = userLikedTrackIds.has(String(track.id));
+    
+    let actionBtnHTML = '';
+    if (isLibrary) {
+      actionBtnHTML = `<button class="btn-delete" title="Удалить">✕</button>`;
+    } else {
+      // Если трек лайкнут, сразу ставим красное сердечко
+      actionBtnHTML = `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
+    }
 
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
@@ -163,12 +185,22 @@ function renderTracks(tracksArray, isLibrary = false) {
         if (!confirm('Удалить этот трек?')) return;
         try {
           const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
-          if (res.ok) navLibrary.click();
+          if (res.ok) {
+            userLikedTrackIds.delete(String(track.id)); // Убираем из кэша
+            navLibrary.click();
+          }
         } catch (err) {}
       });
     } else {
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
+        
+        // Если уже лайкнут, не даем лайкнуть дважды
+        if (actionBtn.classList.contains('liked')) {
+          // (Опционально: можно сделать удаление при повторном клике)
+          return; 
+        }
+
         try {
           const streamUrl = getStreamUrl(track);
           const res = await fetch('/api/library', {
@@ -182,7 +214,11 @@ function renderTracks(tracksArray, isLibrary = false) {
           if (res.status === 401) {
             alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
           }
-          if (res.ok) { actionBtn.classList.add('liked'); actionBtn.textContent = '❤'; }
+          if (res.ok) { 
+            actionBtn.classList.add('liked'); 
+            actionBtn.textContent = '❤'; 
+            userLikedTrackIds.add(String(track.id)); // Добавляем в кэш
+          }
         } catch (err) {}
       });
     }
@@ -289,12 +325,10 @@ btnPrev.addEventListener('click', () => {
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
-  
   if (!isSeeking) {
     seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   }
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
-  
   if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
 
@@ -340,6 +374,10 @@ function switchTab(activeTab, title, showSearch = false) {
 navHome.addEventListener('click', async () => {
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
+  
+  // Обновляем лайки перед загрузкой треков
+  await loadUserLikes(); 
+  
   try {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
@@ -349,12 +387,13 @@ navHome.addEventListener('click', async () => {
   }
 });
 
-// ОБНОВЛЕНО: Вкладка "Поиск" запоминает прошлый запрос
-navSearch.addEventListener('click', () => {
+navSearch.addEventListener('click', async () => {
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
   
-  // Если есть сохраненный запрос, сразу загружаем его результаты
+  // Обновляем лайки перед поиском
+  await loadUserLikes();
+
   if (lastSearchQuery) {
     searchInput.value = lastSearchQuery;
     performSearch(lastSearchQuery);
@@ -367,7 +406,7 @@ let searchTimeout;
 searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const query = e.target.value.trim();
-  lastSearchQuery = query; // Сохраняем текущий запрос
+  lastSearchQuery = query; 
   
   if (query.length < 2) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
@@ -403,8 +442,10 @@ authContainer.addEventListener('click', (e) => {
 function updateAuthUI(user) {
   if (user) {
     authContainer.innerHTML = `<div class="profile-info"><span>👤 ${user.email}</span><button class="btn-logout" id="btn-logout">Выйти</button></div>`;
+    loadUserLikes(); // При авторизации сразу загружаем лайки
   } else {
     authContainer.innerHTML = `<button class="btn-auth" id="btn-open-auth">Войти</button>`;
+    userLikedTrackIds.clear(); // При выходе очищаем кэш лайков
   }
 }
 
