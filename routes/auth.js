@@ -7,7 +7,6 @@ import 'dotenv/config';
 
 const router = Router();
 
-// Схема валидации через Zod
 const authSchema = z.object({
   email: z.string().email('Некорректный email'),
   password: z.string().min(6, 'Пароль должен быть минимум 6 символов')
@@ -18,46 +17,41 @@ router.post('/register', async (req, res) => {
   try {
     const data = authSchema.parse(req.body);
     
-    // Проверяем, есть ли уже такой email
     const existing = await query('SELECT id FROM users WHERE email = $1', [data.email]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'Этот email уже занят' });
     }
 
-    // Хешируем пароль
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(data.password, salt);
 
-    // Создаём пользователя
     const result = await query(
       'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role',
       [data.email, hash, 'user']
     );
     const user = result.rows[0];
 
-    // Генерируем токен
     const token = jwt.sign(
       { id: user.id, role: user.role }, 
       process.env.JWT_SECRET, 
-      { expiresIn: process.env.JWT_EXPIRES }
+      { expiresIn: process.env.JWT_EXPIRES || '7d' }
     );
 
-    // Отправляем в httpOnly куке
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 дней
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     res.status(201).json({ user });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors[0].message });
-    console.error(err);
+    console.error('Ошибка регистрации:', err);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
 
-// ЛОГИН
+// ВХОД
 router.post('/login', async (req, res) => {
   try {
     const data = authSchema.parse(req.body);
@@ -73,10 +67,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Неверный email или пароль' });
     }
 
+    // Генерируем токен (добавил fallback '7d', если переменная не задана)
     const token = jwt.sign(
       { id: user.id, role: user.role }, 
       process.env.JWT_SECRET, 
-      { expiresIn: process.env.JWT_EXPIRES }
+      { expiresIn: process.env.JWT_EXPIRES || '7d' }
     );
 
     res.cookie('token', token, {
@@ -88,7 +83,7 @@ router.post('/login', async (req, res) => {
     res.json({ user: { id: user.id, email: user.email, role: user.role } });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors[0].message });
-    console.error(err);
+    console.error('Ошибка входа:', err);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
@@ -99,7 +94,7 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Выход выполнен' });
 });
 
-// ПОЛУЧИТЬ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ (чтобы при обновлении страницы фронтенд знал, что мы залогинены)
+// ПОЛУЧИТЬ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ
 router.get('/me', async (req, res) => {
   const token = req.cookies.token;
   if (!token) return res.status(401).json({ error: 'Неавторизован' });
