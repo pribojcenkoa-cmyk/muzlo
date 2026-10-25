@@ -98,7 +98,7 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// 6. СТРИМИНГ (Скачиваем в память, мобилки это 100% понимают)
+// 6. ИДЕАЛЬНЫЙ СТРИМИНГ (С поддержкой Range для ПК и мобилок)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -107,6 +107,7 @@ router.get('/stream', async (req, res) => {
     const info = await scdl.getInfo(trackUrl);
     let directUrl = null;
 
+    // Ищем прямую ссылку на MP3
     if (info.formats) {
       const prog = info.formats.find(f => f.format.protocol === 'progressive');
       if (prog) directUrl = prog.url;
@@ -122,20 +123,30 @@ router.get('/stream', async (req, res) => {
 
     if (!directUrl) throw new Error('Прямая ссылка не найдена');
 
-    // Скачиваем весь файл целиком
-    const audioRes = await axios.get(directUrl, { 
-      responseType: 'arraybuffer',
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+    // Передаем заголовок Range от браузера к SoundCloud
+    const headers = { 'User-Agent': 'Mozilla/5.0' };
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    // Запрашиваем аудио как поток
+    const response = await axios({
+      method: 'get',
+      url: directUrl,
+      responseType: 'stream',
+      headers: headers,
+      validateStatus: status => status >= 200 && status < 400
     });
 
-    const buffer = Buffer.from(audioRes.data);
-    
-    // Отдаем как обычный MP3 файл
+    // Копируем ВСЕ важные заголовки для браузера (это чинит мобилки)
+    res.status(response.status);
+    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.send(buffer);
 
+    // Отдаем поток
+    response.data.pipe(res);
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
