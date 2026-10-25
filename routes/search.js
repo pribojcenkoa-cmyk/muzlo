@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import axios from 'axios';
-import cheerio from 'cheerio';
 import { createRequire } from 'module';
 import { query } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const require = createRequire(import.meta.url);
+const cheerio = require('cheerio');
 const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
@@ -102,7 +102,7 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна (Умная, на основе истории)
+// 5. Моя волна
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
@@ -156,7 +156,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
   }
 });
 
-// 6. История прослушиваний
+// 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
@@ -172,7 +172,7 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// 7. Статистика для профиля
+// 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const totalTime = await query(
