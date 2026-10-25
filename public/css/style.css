@@ -484,3 +484,154 @@ input[type="range"]:hover::-webkit-slider-thumb {
   color: #ff4d4d;
   transform: scale(1.2);
 }
+/* ==========================================
+   МОБИЛЬНАЯ АДАПТАЦИЯ (для экранов до 768px)
+   ========================================== */
+@media (max-width: 768px) {
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Боковая панель превращается в верхнюю панель */
+  .sidebar {
+    width: 100%;
+    height: auto;
+    padding: 12px 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #282828;
+    box-sizing: border-box;
+  }
+
+  .logo-wrapper {
+    margin-bottom: 0;
+    justify-content: space-between;
+    padding-left: 0;
+  }
+
+  /* Меню становится горизонтальным */
+  .sidebar nav ul {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    margin: 0;
+    scrollbar-width: none; /* Скрываем скроллбар */
+  }
+  .sidebar nav ul::-webkit-scrollbar { display: none; }
+
+  .sidebar nav li {
+    padding: 8px 16px;
+    white-space: nowrap;
+    font-size: 14px;
+    background-color: #242424;
+    border-radius: 20px;
+    color: #b3b3b3;
+  }
+
+  .sidebar nav li.active {
+    background-color: #1db954;
+    color: #000;
+    font-weight: bold;
+  }
+
+  /* Основной контент */
+  .content {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .content-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 15px;
+  }
+
+  .content-header h1 {
+    font-size: 24px;
+  }
+
+  .auth-container {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+  }
+
+  .search-box {
+    width: 100%;
+  }
+
+  .search-box input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Треки (уменьшаем отступы) */
+  .track-item {
+    padding: 8px;
+    gap: 10px;
+  }
+
+  .track-cover {
+    width: 40px;
+    height: 40px;
+  }
+
+  .track-title {
+    font-size: 14px;
+  }
+
+  .track-artist {
+    font-size: 12px;
+  }
+
+  .track-duration {
+    display: none; /* Скрываем время, чтобы не мешало тексту */
+  }
+
+  /* Плеер */
+  .player {
+    width: 100%;
+    height: auto;
+    padding: 10px;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    border-top: 1px solid #282828;
+  }
+
+  .player-track-info {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .player-controls {
+    width: 100%;
+  }
+
+  .player-progress {
+    width: 95%;
+  }
+
+  /* Скрываем ползунок громкости на телефоне, чтобы не перегружать экран */
+  .player-volume {
+    display: none; 
+  }
+
+  /* Модальное окно входа */
+  .modal-content {
+    width: 90%;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+}
