@@ -1,0 +1,473 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+  background-color: #121212;
+  color: #fff;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 1fr 90px;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Боковая панель */
+.sidebar {
+  background-color: #000;
+  padding: 24px 16px;
+  grid-row: 1 / 2;
+}
+
+.logo {
+  font-size: 24px;
+  font-weight: bold;
+  color: #1db954; /* Зеленый акцент как у Spotify */
+  margin-bottom: 30px;
+  padding-left: 8px;
+}
+
+.sidebar nav ul {
+  list-style: none;
+}
+
+.sidebar nav li {
+  padding: 12px 8px;
+  color: #b3b3b3;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.sidebar nav li:hover, .sidebar nav li.active {
+  color: #fff;
+}
+
+/* Основной контент */
+.content {
+  background: linear-gradient(to bottom, #1f1f1f, #121212);
+  padding: 24px 32px;
+  overflow-y: auto;
+  grid-row: 1 / 2;
+}
+
+.content-header h1 {
+  font-size: 32px;
+  margin-bottom: 24px;
+}
+
+.track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.track-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* Разносит текст и время по краям */
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.track-item:hover {
+ background-color: rgba(255, 255, 255, 0.1);
+}
+
+.track-item.active {
+  background-color: rgba(29, 185, 84, 0.2);
+}
+
+.track-cover {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  object-fit: cover;
+  background-color: #333;
+  margin-right: 16px;
+}
+
+.track-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column; /* Ставит название над артистом */
+  margin-left: 16px;
+}
+
+.track-title {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.track-artist {
+  font-size: 14px;
+  color: #b3b3b3;
+}
+
+.track-duration {
+  color: #b3b3b3;
+  font-size: 14px;
+}
+
+/* Плеер */
+.player {
+  background-color: #181818;
+  border-top: 1px solid #282828;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+
+.player-track-info {
+  display: flex;
+  align-items: center;
+  width: 30%;
+}
+
+.player-cover {
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  object-fit: cover;
+  margin-right: 12px;
+}
+
+.player-cover.hidden {
+  display: none;
+}
+
+.player-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.player-artist {
+  font-size: 12px;
+  color: #b3b3b3;
+}
+
+.player-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 40%;
+}
+
+.player-buttons {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.control-btn {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  font-size: 16px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.control-btn:hover {
+  color: #fff;
+}
+
+.play-btn {
+  background-color: #fff;
+  color: #000;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.play-btn:hover {
+  transform: scale(1.05);
+}
+
+.player-progress {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  font-size: 12px;
+  color: #b3b3b3;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: #4d4d4d;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.player-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 30%;
+  justify-content: flex-end;
+}
+.player-volume input {
+  width: 100px;
+}
+/* Кнопка в шапке */
+.btn-auth {
+  background-color: transparent;
+  color: #fff;
+  border: 1px solid #fff;
+  padding: 8px 24px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-auth:hover {
+  background-color: #fff;
+  color: #000;
+}
+
+/* Модальное окно */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+.modal.active {
+  display: flex;
+}
+.modal-content {
+  background-color: #181818;
+  padding: 40px;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 400px;
+  position: relative;
+  text-align: center;
+}
+.close-btn {
+  position: absolute;
+  top: 15px; right: 20px;
+  font-size: 28px;
+  cursor: pointer;
+  color: #b3b3b3;
+}
+.close-btn:hover { color: #fff; }
+.modal-content h2 { margin-bottom: 24px; }
+.modal-content input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 16px;
+  background-color: #121212;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 16px;
+}
+.modal-content input:focus { outline: 1px solid #1db954; }
+.btn-submit {
+  width: 100%;
+  padding: 14px;
+  background-color: #1db954;
+  color: #000;
+  border: none;
+  border-radius: 24px;
+  font-weight: bold;
+  font-size: 16px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.btn-submit:hover { transform: scale(1.04); }
+.toggle-auth {
+  margin-top: 20px;
+  font-size: 14px;
+  color: #b3b3b3;
+}
+.toggle-auth a { color: #fff; text-decoration: underline; }
+
+/* Блок профиля */
+.profile-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+}
+.btn-logout {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.btn-logout:hover { color: #fff; }
+/* Меню */
+.sidebar nav li { transition: color 0.2s, background 0.2s; padding: 12px 16px; border-radius: 8px; margin-bottom: 4px;}
+.sidebar nav li.active { background-color: rgba(255,255,255,0.1); color: #fff; }
+
+/* Поиск */
+.search-box input {
+  background-color: #242424;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 20px;
+  color: #fff;
+  font-size: 14px;
+  width: 300px;
+  outline: none;
+}
+.search-box input:focus { background-color: #2a2a2a; box-shadow: 0 0 0 2px #fff; }
+
+/* Картинка заглушка */
+.track-cover { background-color: #282828; }
+/* --- ИСПРАВЛЕНИЕ ШАПКИ И КНОПКИ ВХОДА --- */
+.content-header {
+  display: flex;
+  justify-content: space-between; /* Разносит элементы по краям */
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+.content-header h1 {
+  font-size: 32px;
+  margin: 0;
+}
+
+.auth-container {
+  display: flex;
+  align-items: center;
+  min-width: 100px; /* Чтобы шапка не прыгала, когда кнопка меняется на профиль */
+  justify-content: flex-end;
+}
+
+.btn-auth {
+  background-color: transparent;
+  color: #fff;
+  border: 1px solid #b3b3b3;
+  padding: 8px 24px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-auth:hover {
+  border-color: #fff;
+  transform: scale(1.04);
+}
+
+.profile-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+  background-color: #1a1a1a;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1px solid #333;
+}
+
+.btn-logout {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-logout:hover { color: #ff4d4d; }
+.btn-like {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 12px;
+  transition: transform 0.2s, color 0.2s;
+}
+.btn-like:hover {
+  color: #fff;
+  transform: scale(1.2);
+}
+.btn-like.liked {
+  color: #ff4d4d;
+}
+/* --- ЛОГОТИП И АНИМИРОВАННЫЙ DISCORD --- */
+.logo-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px; /* Расстояние между текстом и иконкой */
+  margin-bottom: 30px;
+  padding-left: 8px;
+}
+
+.logo-wrapper .logo {
+  margin-bottom: 0; /* Убираем старый отступ, чтобы не ломать верстку */
+  padding-left: 0;
+}
+
+.discord-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background-color: #5865F2;
+  border-radius: 50%;
+  color: #fff;
+  /* Анимация парения */
+  animation: float 2.5s ease-in-out infinite;
+  transition: background-color 0.3s, transform 0.3s;
+}
+
+.discord-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* Эффект при наведении мыши */
+.discord-icon:hover {
+  background-color: #4752C4;
+  transform: scale(1.15) rotate(-10deg); /* Чуть увеличивается и наклоняется */
+  animation-play-state: paused; /* Останавливает парение, чтобы удобно нажать */
+  box-shadow: 0 0 12px rgba(88, 101, 242, 0.8);
+}
+
+/* Сама анимация парения */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-7px); }
+  100% { transform: translateY(0px); }
+}
