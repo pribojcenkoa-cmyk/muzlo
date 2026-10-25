@@ -7,6 +7,7 @@ import 'dotenv/config';
 
 const router = Router();
 
+// Схема валидации
 const authSchema = z.object({
   email: z.string().email('Некорректный email'),
   password: z.string().min(6, 'Пароль должен быть минимум 6 символов')
@@ -17,30 +18,35 @@ router.post('/register', async (req, res) => {
   try {
     const data = authSchema.parse(req.body);
     
+    // Проверяем, есть ли уже такой email
     const existing = await query('SELECT id FROM users WHERE email = $1', [data.email]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'Этот email уже занят' });
     }
 
+    // Хешируем пароль
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(data.password, salt);
 
+    // Создаём пользователя
     const result = await query(
       'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role',
       [data.email, hash, 'user']
     );
     const user = result.rows[0];
 
+    // Генерируем токен (жестко на 7 дней)
     const token = jwt.sign(
       { id: user.id, role: user.role }, 
       process.env.JWT_SECRET, 
-      { expiresIn: process.env.JWT_EXPIRES || '7d' }
+      { expiresIn: '7d' } 
     );
 
+    // Отправляем в httpOnly куке
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 дней в миллисекундах
     });
 
     res.status(201).json({ user });
@@ -67,11 +73,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Неверный email или пароль' });
     }
 
-    // Генерируем токен (добавил fallback '7d', если переменная не задана)
+    // Генерируем токен (жестко на 7 дней)
     const token = jwt.sign(
       { id: user.id, role: user.role }, 
       process.env.JWT_SECRET, 
-      { expiresIn: process.env.JWT_EXPIRES || '7d' }
+      { expiresIn: '7d' }
     );
 
     res.cookie('token', token, {
@@ -94,7 +100,7 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Выход выполнен' });
 });
 
-// ПОЛУЧИТЬ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ
+// ПОЛУЧИТЬ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ (проверка при загрузке страницы)
 router.get('/me', async (req, res) => {
   const token = req.cookies.token;
   if (!token) return res.status(401).json({ error: 'Неавторизован' });
