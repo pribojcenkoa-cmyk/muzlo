@@ -18,7 +18,7 @@ async function searchSoundCloud(query, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000) // Только до 15 минут
+    .filter(track => track.duration < 900000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. Точная длительность (чтобы ползунок не застревал)
+// 3. Точная длительность
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -74,19 +74,60 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. Страница артиста
+// 4. СТРАНИЦА АРТИСТА (ИСПРАВЛЕНО: ищем именно профиль, а не текст)
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
+  
   try {
-    const tracks = await searchSoundCloud(artistName);
+    // Сначала ищем самого артиста (профиль), а не треки
+    const userSearch = await scdl.search({
+      query: artistName,
+      resourceType: 'users',
+      limit: 5
+    });
+
+    if (!userSearch.collection || userSearch.collection.length === 0) {
+      return res.json({ tracks: [] });
+    }
+
+    // Берем самого подходящего артиста (совпадение по имени)
+    const artist = userSearch.collection.find(u => 
+      u.username.toLowerCase() === artistName.toLowerCase()
+    ) || userSearch.collection[0];
+
+    // Теперь загружаем ТОЛЬКО ЕГО треки по публичной ссылке профиля
+    const tracksRes = await scdl.getTracks({
+      url: artist.permalink_url,
+      limit: 50
+    });
+
+    const tracks = tracksRes.collection
+      .filter(track => track.duration < 900000)
+      .map(track => {
+        let cover = track.artwork_url || (track.user && track.user.avatar_url);
+        if (cover) cover = cover.replace('large', 't500x500');
+
+        return {
+          id: track.id,
+          title: track.title,
+          artist_name: track.user ? track.user.username : 'Неизвестен',
+          cover_url: cover,
+          duration: Math.round(track.duration / 1000),
+          permalink_url: track.permalink_url,
+          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`,
+          is_external: false 
+        };
+      });
+
     res.json({ tracks });
   } catch (err) {
+    console.error('Ошибка загрузки артиста:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// 5. СТРИМИНГ (прямое скачивание потока - работало на ПК)
+// 5. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
