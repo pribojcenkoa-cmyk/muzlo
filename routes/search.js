@@ -27,7 +27,6 @@ async function searchSoundCloud(query, offset = 0) {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
 
-      // ПРОКСИРУЕМ КАРТИНКИ ЧЕРЕЗ НАШ СЕРВЕР
       const proxyCover = cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null;
 
       return {
@@ -43,7 +42,6 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
-// 1. Рекомендации
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
@@ -59,12 +57,10 @@ router.get('/trending', async (req, res) => {
     
     res.json({ tracks: artistTracks.length > 0 ? artistTracks : tracks });
   } catch (err) {
-    console.error('Ошибка рекомендаций:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// 2. Поиск
 router.get('/', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.json({ tracks: [] });
@@ -76,7 +72,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. Точная длительность
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -88,52 +83,65 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. Страница артиста
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
   
   try {
     const tracks = await searchSoundCloud(artistName);
-    
     const filteredTracks = tracks.filter(t => {
       const trackArtist = t.artist_name.toLowerCase();
       const searchName = artistName.toLowerCase();
       return trackArtist.includes(searchName) || searchName.includes(trackArtist);
     });
-
     res.json({ tracks: filteredTracks });
   } catch (err) {
-    console.error('Ошибка загрузки артиста:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// 5. ПРОКСИ ДЛЯ КАРТИНОК (чтобы не блокировались на мобильных)
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
     if (!imageUrl) return res.status(400).send('Нет URL');
-    
     const response = await axios.get(imageUrl, { 
-      responseType: 'stream',
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+      responseType: 'stream', headers: { 'User-Agent': 'Mozilla/5.0' }
     });
-    
     res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Кэш на сутки
+    res.setHeader('Cache-Control', 'public, max-age=86400');
     response.data.pipe(res);
   } catch (err) {
     res.redirect('/img/default-cover.png');
   }
 });
 
-// 6. Стриминг
+// СТРИМИНГ (Прямая ссылка для идеальной перемотки)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
 
+    const info = await scdl.getInfo(trackUrl);
+    let directUrl = null;
+
+    if (info.formats) {
+      const prog = info.formats.find(f => f.format.protocol === 'progressive');
+      if (prog) directUrl = prog.url;
+    }
+
+    if (!directUrl && info.media && info.media.transcodings) {
+      const trans = info.media.transcodings.find(t => t.format.protocol === 'progressive');
+      if (trans) {
+        const tRes = await axios.get(trans.url, { params: { client_id: scdl.client_id } });
+        directUrl = tRes.data.url;
+      }
+    }
+
+    if (directUrl) {
+      return res.redirect(directUrl);
+    }
+
+    // Фоллбек, если прямой ссылки нет
     const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
     stream.pipe(res);
