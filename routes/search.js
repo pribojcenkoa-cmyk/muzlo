@@ -101,11 +101,12 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. МОЯ ВОЛНА (Умный рандом по лайкам)
+// 5. МОЯ ВОЛНА (Умный рандом по лайкам - ИСПРАВЛЕНО)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
+    // Берем 5 случайных уникальных исполнителей из медиатеки
     const liked = await query(
-      'SELECT artist_name FROM user_library WHERE user_id = $1 ORDER BY RANDOM() LIMIT 3',
+      'SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5',
       [req.user.id]
     );
 
@@ -113,11 +114,28 @@ router.get('/my-wave', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Добавьте треки в медиатеку, чтобы мы поняли ваши вкусы!' });
     }
 
-    const randomArtist = liked.rows[0].artist_name;
-    const tracks = await searchSoundCloud(randomArtist);
-    const shuffled = tracks.sort(() => 0.5 - Math.random()).slice(0, 20);
+    // Ищем треки по каждому исполнителю
+    let allTracks = [];
+    for (const row of liked.rows) {
+      if (!row.artist_name || row.artist_name === 'Неизвестен') continue;
+      const tracks = await searchSoundCloud(row.artist_name);
+      
+      // Фильтруем, чтобы не было сборников
+      const artistTracks = tracks.filter(t => 
+        t.artist_name.toLowerCase().includes(row.artist_name.toLowerCase()) || 
+        row.artist_name.toLowerCase().includes(t.artist_name.toLowerCase())
+      );
+      
+      // Берем до 5 треков от каждого артиста
+      allTracks = allTracks.concat(artistTracks.slice(0, 5));
+    }
+
+    // Перемешиваем итоговый список
+    const shuffled = allTracks.sort(() => 0.5 - Math.random());
+    
     res.json({ tracks: shuffled });
   } catch (err) {
+    console.error('Ошибка волны:', err);
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
 });
