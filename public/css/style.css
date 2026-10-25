@@ -635,3 +635,25 @@ input[type="range"]:hover::-webkit-slider-thumb {
     box-sizing: border-box;
   }
 }
+/* ==========================================
+   СКРЫТИЕ ПЛЕЕРА И СДВИГ ГРОМКОСТИ
+   ========================================== */
+.player.hidden {
+  display: none !important;
+}
+
+/* Когда плеер скрыт, контент занимает всю высоту экрана */
+body:has(.player.hidden) {
+  grid-template-rows: 1fr;
+}
+
+/* Сдвигаем ползунок громкости левее */
+.player {
+  padding-right: 60px; /* Было 16px, стало 60px */
+}
+
+@media (max-width: 768px) {
+  .player {
+    padding-right: 15px; /* На телефонах возвращаем нормальный отступ */
+  }
+}

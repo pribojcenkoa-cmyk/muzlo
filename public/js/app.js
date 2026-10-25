@@ -64,7 +64,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. РЕНДЕР ТРЕКОВ
+// 3. РЕНДЕР ТРЕКОВ (С ЛАЙКАМИ И УДАЛЕНИЕМ)
 // ==========================================
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
@@ -84,12 +84,11 @@ function renderTracks(tracksArray, isLibrary = false) {
       ? `<button class="btn-delete" title="Удалить из медиатеки">✕</button>` 
       : `<button class="btn-like" title="Сохранить в медиатеку">♥</button>`;
 
-    // Оборачиваем имя артиста в span с классом artist-link
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
       <div class="track-info">
         <div class="track-title">${track.title}</div>
-        <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name}">${track.artist_name || 'Неизвестен'}</span></div>
+        <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name || 'Неизвестен'}">${track.artist_name || 'Неизвестен'}</span></div>
       </div>
       <div class="track-duration">${formatTime(track.duration)}</div>
       ${actionBtnHTML}
@@ -101,9 +100,11 @@ function renderTracks(tracksArray, isLibrary = false) {
       this.src = '/img/default-cover.png';
     };
 
-    // Воспроизведение при клике на трек
+    // Клик по самому треку
     div.addEventListener('click', (e) => {
+      // Игнорируем клики по кнопкам и ссылкам, чтобы не запускать трек
       if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
+      
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
@@ -113,16 +114,19 @@ function renderTracks(tracksArray, isLibrary = false) {
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
     
     if (isLibrary) {
+      // Логика удаления из медиатеки
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Удалить этот трек из медиатеки?')) return;
         try {
           const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
-          if (res.ok) navLibrary.click();
+          if (res.ok) navLibrary.click(); // Обновляем медиатеку
         } catch (err) { console.error('Ошибка удаления:', err); }
       });
     } else {
-      actionBtn.addEventListener('click', async () => {
+      // Логика добавления (Лайк)
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         try {
           const streamUrl = getStreamUrl(track);
           const res = await fetch('/api/library', {
@@ -162,57 +166,57 @@ function renderTracks(tracksArray, isLibrary = false) {
   });
 }
 
-// Обработчик клика по имени артиста (делегирование событий)
+// Делегирование клика по имени артиста
 trackListEl.addEventListener('click', (e) => {
   if (e.target.classList.contains('artist-link')) {
-    e.stopPropagation(); // Предотвращаем запуск трека
+    e.stopPropagation(); // Предотвращаем воспроизведение
     const artistName = e.target.dataset.artist;
     loadArtistPage(artistName);
   }
 });
 
 // ==========================================
-// 4. ЗАГРУЗКА СТРАНИЦЫ АРТИСТА
+// 4. СТРАНИЦА АРТИСТА
 // ==========================================
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
   
-  // Сбрасываем активные вкладки
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
   pageTitle.textContent = `Артист: ${artistName}`;
   searchContainer.style.display = 'none';
   
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка треков артиста...</p>';
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка треков...</p>';
   
   try {
     const res = await fetchWithTimeout(`/api/search/artist?name=${encodeURIComponent(artistName)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     
-    // Включаем кнопку "Назад", чтобы вернуться на главную
-    const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #333; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад на главную</button>`;
-    trackListEl.innerHTML = backBtnHTML;
-    
-    // Рендерим треки
-    const tempDiv = document.createElement('div');
+    // Отрисовываем треки
     renderTracks(data.tracks);
     
-    // Перемещаем треки после кнопки "Назад"
-    const tracksHTML = trackListEl.innerHTML;
-    trackListEl.innerHTML = backBtnHTML + tracksHTML;
+    // Добавляем кнопку "Назад" в самое начало списка
+    const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">← Назад на главную</button>`;
+    trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
     
-    // Обработчик для кнопки "Назад"
+    // Вешаем событие на кнопку "Назад"
     document.getElementById('btn-back-home').addEventListener('click', () => navHome.click());
     
   } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки треков артиста.</p>';
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки артиста.</p>';
   }
 }
 
 // ==========================================
-// 5. УПРАВЛЕНИЕ ПЛЕЕРОМ
+// 5. ПЛЕЕР
 // ==========================================
 async function playTrack(track) {
+  // Показываем плеер, если он скрыт (появится только при первом клике)
+  const playerEl = document.querySelector('.player');
+  if (playerEl && playerEl.classList.contains('hidden')) {
+    playerEl.classList.remove('hidden');
+  }
+
   playerTitle.textContent = track.title;
   playerArtist.textContent = track.artist_name || 'Неизвестен';
   
@@ -229,6 +233,7 @@ async function playTrack(track) {
 
   audioPlayer.src = getStreamUrl(track);
   
+  // Запрашиваем точную длительность, чтобы ползунок не застревал
   if (track.permalink_url) {
     try {
       const res = await fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`);
