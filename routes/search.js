@@ -19,14 +19,13 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// Вспомогательная функция поиска в SoundCloud
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000) // Отсеиваем сборники > 15 мин
+    .filter(track => track.duration < 900000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
@@ -45,7 +44,7 @@ async function searchSoundCloud(q, offset = 0) {
     });
 }
 
-// 1. Рекомендации (Главная)
+// 1. Рекомендации
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
@@ -62,7 +61,7 @@ router.get('/trending', async (req, res) => {
   }
 });
 
-// 2. Поиск по миру
+// 2. Поиск
 router.get('/', async (req, res) => {
   const q = req.query.q;
   if (!q) return res.json({ tracks: [] });
@@ -74,7 +73,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. Инфо о треке (точная длительность)
+// 3. Инфо
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -103,7 +102,7 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна (Умная, на основе истории)
+// 5. Моя волна
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
@@ -157,7 +156,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
   }
 });
 
-// 6. Сохранение истории прослушивания
+// 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
@@ -173,7 +172,7 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// 7. Статистика для профиля
+// 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const totalTime = await query(
@@ -241,76 +240,74 @@ router.get('/import-yandex', async (req, res) => {
 
   let parsedTracks = [];
 
-  // СПОСОБ 1: Внутренний JSON API Яндекса
-  try {
-    let apiUrl = null;
-    if (url.includes('/users/')) {
-      const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
-      if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${match[1]}&kinds=${match[2]}`;
-    } else if (url.includes('/playlists/')) {
-      const match = url.match(/playlists\/([a-zA-Z0-9-]+)/);
-      if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?uuid=${match[1]}`;
-    }
-
-    if (apiUrl) {
-      console.log('[Yandex API] Запрос к:', apiUrl);
-      const response = await axios.get(apiUrl, {
-        headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Accept': 'application/json'
-        },
-        timeout: 10000
-      });
-
-      if (response.data && response.data.playlist && response.data.playlist.tracks) {
-        parsedTracks = response.data.playlist.tracks;
-        console.log(`[Yandex API] ✅ Успех! Найдено треков: ${parsedTracks.length}`);
-      }
-    }
-  } catch (err) {
-    console.log('[Yandex API] ❌ Не сработал:', err.message);
+  // 1. Формируем правильный URL к внутреннему API Яндекса
+  let apiUrl = null;
+  if (url.includes('/users/')) {
+    const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
+    if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${match[1]}&kinds=${match[2]}&lang=ru`;
+  } else if (url.includes('/playlists/')) {
+    const match = url.match(/playlists\/([a-zA-Z0-9-]+)/);
+    if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?uuid=${match[1]}&lang=ru`;
   }
 
-  // СПОСОБ 2: Jina AI Reader (выполняет JS и возвращает текст)
+  // 2. Пробуем разные прокси для запроса к API
+  if (apiUrl) {
+    const PROXIES = [
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(apiUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`
+    ];
+
+    for (const proxyUrl of PROXIES) {
+      try {
+        console.log(`[Yandex API] Пробуем: ${proxyUrl}`);
+        const response = await axios.get(proxyUrl, {
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          },
+          timeout: 8000
+        });
+
+        if (response.data && response.data.playlist && response.data.playlist.tracks) {
+          parsedTracks = response.data.playlist.tracks;
+          console.log(`[Yandex API] ✅ Успех через прокси! Найдено: ${parsedTracks.length}`);
+          break;
+        }
+      } catch (err) {
+        console.log(`[Yandex API] ❌ Ошибка прокси: ${err.message}`);
+      }
+    }
+  }
+
+  // 3. Если API не сработал, пробуем Jina AI
   if (parsedTracks.length === 0) {
     try {
-      console.log('[Yandex Jina] Пробуем через Jina AI...');
+      console.log('[Yandex Jina] Пробуем Jina AI...');
       const jinaUrl = `https://r.jina.ai/${url}`;
-      const response = await axios.get(jinaUrl, { 
-        headers: { 'Accept': 'text/plain' },
-        timeout: 30000
-      });
+      const response = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 30000 });
       
-      const text = response.data;
-      console.log('[Yandex Jina] Ответ получен, длина:', text.length);
-
-      const lines = text.split('\n');
+      const lines = response.data.split('\n');
       for (const line of lines) {
-        // Очищаем строку от Markdown-тегов и нумерации
-        const cleanLine = line.replace(/\[|\]\(.*?\)|\d+\.\s*/g, '').trim(); 
-        
-        // Если есть разделитель " - " и длина адекватная, считаем это треком
-        if (cleanLine.includes(' - ') && cleanLine.length > 3 && cleanLine.length < 100) {
+        const cleanLine = line.replace(/\[|\]\(.*?\)|\d+\.\s*/g, '').trim();
+        if (cleanLine.includes(' - ') && cleanLine.length > 3 && cleanLine.length < 150 && !cleanLine.includes('http')) {
           const parts = cleanLine.split(' - ');
           if (parts.length >= 2) {
-            parsedTracks.push({
-              title: parts[1].trim(),
-              artists: [{ name: parts[0].trim() }]
-            });
+            parsedTracks.push({ title: parts[1].trim(), artists: [{ name: parts[0].trim() }] });
           }
         }
       }
-      console.log(`[Yandex Jina] Найдено треков: ${parsedTracks.length}`);
+      console.log(`[Yandex Jina] Найдено: ${parsedTracks.length}`);
     } catch (err) {
       console.log('[Yandex Jina] ❌ Ошибка:', err.message);
     }
   }
 
   if (parsedTracks.length === 0) {
-    return res.status(404).json({ error: 'Не удалось найти треки. Яндекс блокирует запросы или плейлист пуст.' });
+    return res.status(404).json({ error: 'Яндекс блокирует все прокси. Попробуйте SoundCloud.' });
   }
 
-  // Ищем треки в SoundCloud
+  // 4. Ищем найденные треки в SoundCloud
   const tracks = [];
   for (const track of parsedTracks) {
     if (!track.title) continue;
@@ -320,20 +317,18 @@ router.get('/import-yandex', async (req, res) => {
 
     try {
       const found = await searchSoundCloud(searchQuery);
-      if (found.length > 0) {
-        tracks.push(found[0]); // Берем первый результат
-      }
+      if (found.length > 0) tracks.push(found[0]);
     } catch (e) {}
   }
 
   if (tracks.length === 0) {
-    return res.status(404).json({ error: 'Ни один из треков плейлиста не найден в SoundCloud.' });
+    return res.status(404).json({ error: `Найдено ${parsedTracks.length} треков, но ни один не найден в SoundCloud.` });
   }
 
   res.json({ tracks });
 });
 
-// 10. Прокси для картинок
+// 10. Прокси картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -345,7 +340,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 11. Стриминг аудио
+// 11. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
