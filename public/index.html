@@ -103,6 +103,23 @@
     </div>
   </div>
 
+  <!-- Модальное окно ИМПОРТА ИЗ SOUNDCLOUD -->
+  <div class="modal" id="import-modal">
+    <div class="modal-content">
+      <span class="close-btn" id="btn-close-import">&times;</span>
+      <h2>Импорт из SoundCloud</h2>
+      <p style="color: #b3b3b3; margin-bottom: 20px; font-size: 14px;">
+        Введите ссылку на ваш профиль SoundCloud, чтобы загрузить все ваши лайки на наш сайт.
+      </p>
+      
+      <input type="text" id="import-url" placeholder="https://soundcloud.com/ваш_ник">
+      
+      <button type="button" class="btn-submit" id="btn-do-import">Загрузить</button>
+      
+      <div id="import-status" style="margin-top: 15px; font-size: 14px;"></div>
+    </div>
+  </div>
+
   <!-- Подключение скриптов -->
   <script src="/js/app.js"></script>
 </body>

@@ -41,6 +41,7 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
+// 1. Рекомендации
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
@@ -57,6 +58,7 @@ router.get('/trending', async (req, res) => {
   }
 });
 
+// 2. Поиск
 router.get('/', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.json({ tracks: [] });
@@ -68,6 +70,7 @@ router.get('/', async (req, res) => {
   }
 });
 
+// 3. Инфо
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -79,6 +82,7 @@ router.get('/info', async (req, res) => {
   }
 });
 
+// 4. Страница артиста
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
@@ -95,6 +99,55 @@ router.get('/artist', async (req, res) => {
   }
 });
 
+// 5. ЗАГРУЗКА ЛАЙКОВ ПОЛЬЗОВАТЕЛЯ (Медиатека SoundCloud)
+router.get('/import-likes', async (req, res) => {
+  let profileUrl = req.query.url;
+  if (!profileUrl) return res.status(400).json({ error: 'Ссылка на профиль не передана' });
+
+  // Нормализуем ссылку (убираем лишние слэши)
+  profileUrl = profileUrl.replace(/\/$/, '');
+
+  try {
+    // Идем на страницу лайков пользователя
+    const likesUrl = `${profileUrl}/likes`;
+    console.log(`[Import] Загружаем лайки с: ${likesUrl}`);
+
+    const likesResult = await scdl.getTracks({
+      url: likesUrl,
+      limit: 100 // Загружаем до 100 лайков
+    });
+
+    if (!likesResult.collection || likesResult.collection.length === 0) {
+      return res.json({ tracks: [], message: 'Лайки не найдены или профиль закрыт' });
+    }
+
+    const tracks = likesResult.collection
+      .filter(track => track.duration < 900000)
+      .map(track => {
+        let cover = track.artwork_url || (track.user && track.user.avatar_url);
+        if (cover) cover = cover.replace('large', 't500x500');
+        const proxyCover = cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null;
+
+        return {
+          id: track.id,
+          title: track.title,
+          artist_name: track.user ? track.user.username : 'Неизвестен',
+          cover_url: proxyCover,
+          duration: Math.round(track.duration / 1000),
+          permalink_url: track.permalink_url,
+          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`,
+          is_external: false 
+        };
+      });
+
+    res.json({ tracks });
+  } catch (err) {
+    console.error('Ошибка импорта лайков:', err.message);
+    res.status(500).json({ error: 'Не удалось загрузить лайки. Возможно, профиль закрыт или ссылка неверная.' });
+  }
+});
+
+// 6. Прокси картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -108,17 +161,15 @@ router.get('/cover', async (req, res) => {
   }
 });
 
-// СТРИМИНГ (простое скачивание через scdl, БЕЗ Range)
+// 7. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
-
     const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
     stream.pipe(res);
   } catch (err) {
-    console.error('Ошибка стриминга:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });

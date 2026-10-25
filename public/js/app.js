@@ -1,8 +1,8 @@
 // Очистка старого кэша
-if (localStorage.getItem('muzlo_version') !== '7.0') {
+if (localStorage.getItem('muzlo_version') !== '9.0') {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
-  localStorage.setItem('muzlo_version', '7.0');
+  localStorage.setItem('muzlo_version', '9.0');
 }
 
 // 1. ИНИЦИАЛИЗАЦИЯ
@@ -28,6 +28,13 @@ const authModal = document.getElementById('auth-modal');
 const authForm = document.getElementById('auth-form');
 const authContainer = document.getElementById('auth-container');
 
+// Элементы импорта
+const importModal = document.getElementById('import-modal');
+const btnCloseImport = document.getElementById('btn-close-import');
+const importUrlInput = document.getElementById('import-url');
+const btnDoImport = document.getElementById('btn-do-import');
+const importStatus = document.getElementById('import-status');
+
 let currentTracks = [];
 let currentTrackIndex = -1;
 let isPlaying = false;
@@ -35,7 +42,7 @@ let isLoginMode = true;
 let currentTrackRealDuration = 0;
 let isSeeking = false;
 let lastSearchQuery = ''; 
-let userLikedTrackIds = new Set(); // Храним ID всех лайкнутых треков
+let userLikedTrackIds = new Set(); 
 
 // 2. УТИЛИТЫ
 const formatTime = (seconds) => {
@@ -66,18 +73,14 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   }
 }
 
-// ФУНКЦИЯ ЗАГРУЗКИ ЛАЙКОВ (Синхронизация с БД)
 async function loadUserLikes() {
   try {
     const res = await fetch('/api/library');
     if (res.ok) {
       const data = await res.json();
-      // Записываем ID всех треков из медиатеки в Set
       userLikedTrackIds = new Set(data.tracks.map(t => String(t.id)));
     }
-  } catch (err) {
-    console.log('Не удалось загрузить лайки (возможно, не авторизован)');
-  }
+  } catch (err) {}
 }
 
 async function performSearch(query) {
@@ -144,14 +147,11 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.className = 'track-item';
     div.dataset.index = index;
     
-    // Проверяем, лайкнут ли уже трек
     const isLiked = userLikedTrackIds.has(String(track.id));
-    
     let actionBtnHTML = '';
     if (isLibrary) {
       actionBtnHTML = `<button class="btn-delete" title="Удалить">✕</button>`;
     } else {
-      // Если трек лайкнут, сразу ставим красное сердечко
       actionBtnHTML = `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
     }
 
@@ -186,7 +186,7 @@ function renderTracks(tracksArray, isLibrary = false) {
         try {
           const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
           if (res.ok) {
-            userLikedTrackIds.delete(String(track.id)); // Убираем из кэша
+            userLikedTrackIds.delete(String(track.id)); 
             navLibrary.click();
           }
         } catch (err) {}
@@ -194,12 +194,7 @@ function renderTracks(tracksArray, isLibrary = false) {
     } else {
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        
-        // Если уже лайкнут, не даем лайкнуть дважды
-        if (actionBtn.classList.contains('liked')) {
-          // (Опционально: можно сделать удаление при повторном клике)
-          return; 
-        }
+        if (actionBtn.classList.contains('liked')) return; 
 
         try {
           const streamUrl = getStreamUrl(track);
@@ -217,7 +212,7 @@ function renderTracks(tracksArray, isLibrary = false) {
           if (res.ok) { 
             actionBtn.classList.add('liked'); 
             actionBtn.textContent = '❤'; 
-            userLikedTrackIds.add(String(track.id)); // Добавляем в кэш
+            userLikedTrackIds.add(String(track.id)); 
           }
         } catch (err) {}
       });
@@ -374,10 +369,7 @@ function switchTab(activeTab, title, showSearch = false) {
 navHome.addEventListener('click', async () => {
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
-  
-  // Обновляем лайки перед загрузкой треков
   await loadUserLikes(); 
-  
   try {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
@@ -390,8 +382,6 @@ navHome.addEventListener('click', async () => {
 navSearch.addEventListener('click', async () => {
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
-  
-  // Обновляем лайки перед поиском
   await loadUserLikes();
 
   if (lastSearchQuery) {
@@ -442,10 +432,10 @@ authContainer.addEventListener('click', (e) => {
 function updateAuthUI(user) {
   if (user) {
     authContainer.innerHTML = `<div class="profile-info"><span>👤 ${user.email}</span><button class="btn-logout" id="btn-logout">Выйти</button></div>`;
-    loadUserLikes(); // При авторизации сразу загружаем лайки
+    loadUserLikes(); 
   } else {
     authContainer.innerHTML = `<button class="btn-auth" id="btn-open-auth">Войти</button>`;
-    userLikedTrackIds.clear(); // При выходе очищаем кэш лайков
+    userLikedTrackIds.clear(); 
   }
 }
 
@@ -493,7 +483,72 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// 8. СТАРТ
+// ==========================================
+// 9. ИМПОРТ ЛАЙКОВ SOUNDCLOUD (НОВОЕ ОКНО)
+// ==========================================
+
+// Создаем кнопку импорта
+const importBtn = document.createElement('button');
+importBtn.className = 'btn-auth';
+importBtn.style.marginTop = '10px';
+importBtn.style.backgroundColor = '#ff5500';
+importBtn.style.color = '#fff';
+importBtn.style.border = 'none';
+importBtn.textContent = 'Загрузить мои лайки';
+importBtn.addEventListener('click', () => {
+  importModal.classList.add('active');
+  importStatus.textContent = ''; 
+  importUrlInput.value = ''; 
+});
+
+// Добавляем кнопку в сайдбар
+const authCont = document.getElementById('auth-container');
+authCont.parentNode.insertBefore(importBtn, authCont.nextSibling);
+
+// Обработчики модального окна
+btnCloseImport.addEventListener('click', () => importModal.classList.remove('active'));
+importModal.addEventListener('click', (e) => {
+  if (e.target === importModal) importModal.classList.remove('active');
+});
+
+btnDoImport.addEventListener('click', async () => {
+  const url = importUrlInput.value.trim();
+  if (!url || !url.includes('soundcloud.com')) {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Введите корректную ссылку (https://soundcloud.com/...)';
+    return;
+  }
+
+  importStatus.style.color = '#1db954'; 
+  importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
+  btnDoImport.disabled = true;
+
+  try {
+    const res = await fetch(`/api/search/import-likes?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+
+    if (data.tracks && data.tracks.length > 0) {
+      importStatus.textContent = `Успех! Загружено треков: ${data.tracks.length}`;
+      
+      setTimeout(() => {
+        importModal.classList.remove('active');
+        switchTab(navSearch, 'Мои лайки', false);
+        renderTracks(data.tracks);
+        btnDoImport.disabled = false;
+      }, 1500);
+    } else {
+      importStatus.style.color = '#ff4d4d';
+      importStatus.textContent = 'Лайки не найдены. Проверьте ссылку или откройте профиль.';
+      btnDoImport.disabled = false;
+    }
+  } catch (err) {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Ошибка соединения. Попробуйте позже.';
+    btnDoImport.disabled = false;
+  }
+});
+
+// 10. СТАРТ
 checkAuth();
 restorePlayerState(); 
 navHome.click();
