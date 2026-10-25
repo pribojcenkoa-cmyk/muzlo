@@ -108,9 +108,17 @@
     <div class="modal-content">
       <span class="close-btn" id="btn-close-import">&times;</span>
       <h2>Импорт из SoundCloud</h2>
-      <p style="color: #b3b3b3; margin-bottom: 20px; font-size: 14px;">
-        Введите ссылку на ваш профиль SoundCloud, чтобы загрузить все ваши лайки на наш сайт.
-      </p>
+      
+      <!-- Инструкция для пользователя -->
+      <div style="text-align: left; background: #242424; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #b3b3b3;">
+        <p style="margin-bottom: 10px; color: #fff; font-weight: bold;">Как это работает?</p>
+        <ol style="margin-left: 20px; display: flex; flex-direction: column; gap: 8px;">
+          <li>Зайдите на ваш профиль в SoundCloud (soundcloud.com).</li>
+          <li>Скопируйте ссылку из адресной строки браузера. <br><span style="color:#1db954; font-size: 12px;">Она выглядит так: https://soundcloud.com/ваш_ник</span></li>
+          <li>Вставьте её в поле ниже и нажмите «Загрузить».</li>
+        </ol>
+        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Работает только если ваш профиль открыт для просмотра (публичный).</p>
+      </div>
       
       <input type="text" id="import-url" placeholder="https://soundcloud.com/ваш_ник">
       
