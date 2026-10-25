@@ -205,7 +205,7 @@ async function loadArtistPage(artistName) {
 }
 
 // ==========================================
-// 6. ПЛЕЕР (ГЛАВНОЕ ИСПРАВЛЕНИЕ ДЛЯ МОБИЛЬНЫХ)
+// 6. ПЛЕЕР
 // ==========================================
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
@@ -227,8 +227,8 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  // Мгновенно вызываем play() без ожидания запросов
   audioPlayer.src = getStreamUrl(track);
+  
   audioPlayer.play().then(() => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
@@ -238,18 +238,6 @@ function playTrack(track) {
     btnPlay.textContent = '▶';
     isPlaying = false;
   });
-
-  // В фоне уточняем длительность
-  if (track.permalink_url) {
-    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.duration) {
-          currentTrackRealDuration = data.duration;
-          totalTimeEl.textContent = formatTime(data.duration);
-        }
-      }).catch(e => {});
-  }
 }
 
 btnPlay.addEventListener('click', () => {
@@ -344,7 +332,7 @@ searchInput.addEventListener('input', (e) => {
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
   searchTimeout = setTimeout(async () => {
     try {
-    const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
+      const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
       renderTracks(data.tracks);
     } catch (err) {

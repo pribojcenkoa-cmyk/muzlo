@@ -1,103 +1,102 @@
 import { Router } from 'express';
 import axios from 'axios';
+import YouTube from 'youtube-sr';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const ytdl = require('@distube/ytdl-core');
 
 const router = Router();
 
-const PIPED_APIS = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.adminforge.de',
-  'https://api.piped.private.coffee',
-  'https://pipedapi.leptons.xyz'
+// Список надежных серверов-посредников Invidious
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://yewtu.be',
+  'https://invidious.nerdvpn.de',
+  'https://vid.puffyan.us'
 ];
 
-async function fetchPiped(endpoint) {
-  for (const api of PIPED_APIS) {
-    try {
-      const res = await axios.get(`${api}${endpoint}`, { timeout: 8000 });
-      return { data: res.data, api };
-    } catch (e) {
-      console.log(`[Piped] ${api} failed`);
-    }
+// Поиск через youtube-sr (очень быстрый и стабильный)
+async function searchYouTube(query) {
+  try {
+    const results = await YouTube.search(query, { limit: 25, type: 'video' });
+    return results.map(v => ({
+      id: v.id,
+      title: v.title,
+      artist_name: v.channel.name,
+      cover_url: v.thumbnail?.url,
+      duration: Math.round(v.duration / 1000),
+      stream_url: `/api/search/stream/${v.id}`,
+      is_external: false
+    }));
+  } catch (err) {
+    console.error('Ошибка поиска:', err.message);
+    return [];
   }
-  throw new Error('All Piped APIs failed');
 }
 
-function mapTrack(item) {
-  let videoId = item.url ? item.url.split('v=')[1] : item.id;
-  return {
-    id: videoId,
-    title: item.title,
-    artist_name: item.uploaderName,
-    cover_url: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-    duration: item.duration,
-    stream_url: `/api/search/stream/${videoId}`, 
-    is_external: false
-  };
-}
-
+// 1. Рекомендации (Топовые рэперы)
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    // Топовые рэперы (через YouTube)
-    const rappers = ['Future', 'Travis Scott', 'Drake', 'Kendrick Lamar', '21 Savage', 'Metro Boomin'];
+    const rappers = ['Kendrick Lamar', 'Future', 'Travis Scott', 'Drake', 'Metro Boomin', '21 Savage'];
     const randomRapper = rappers[Math.floor(Math.random() * rappers.length)];
-    
-    const { data } = await fetchPiped(`/search?q=${encodeURIComponent(randomRapper)}&filter=music_songs`);
-    const filtered = data.items.filter(i => i.duration < 900); // Только треки до 15 минут
-    res.json({ tracks: filtered.map(mapTrack) });
+    const tracks = await searchYouTube(randomRapper);
+    res.json({ tracks });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
+// 2. Поиск
 router.get('/', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.json({ tracks: [] });
   try {
-    const { data } = await fetchPiped(`/search?q=${encodeURIComponent(query)}&filter=music_songs`);
-    const filtered = data.items.filter(i => i.duration < 900);
-    res.json({ tracks: filtered.map(mapTrack) });
+    const tracks = await searchYouTube(query);
+    res.json({ tracks });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка поиска' });
   }
 });
 
+// 3. Страница артиста
 router.get('/artist', async (req, res) => {
   const query = req.query.name;
   if (!query) return res.json({ tracks: [] });
   try {
-    const { data } = await fetchPiped(`/search?q=${encodeURIComponent(query)}&filter=music_songs`);
-    const filtered = data.items.filter(i => i.duration < 900);
-    res.json({ tracks: filtered.map(mapTrack) });
+    const tracks = await searchYouTube(query);
+    res.json({ tracks });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// СТРИМИНГ ЧЕРЕЗ PIPED
+// 4. ИДЕАЛЬНЫЙ СТРИМИНГ (Invidious -> ytdl fallback)
 router.get('/stream/:id', async (req, res) => {
+  const videoId = req.params.id;
+  
+  // Попытка 1: Через сервера Invidious (они обходят блокировки IP)
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const proxyUrl = `${instance}/latest_version?id=${videoId}&itag=140`;
+      const check = await axios.head(proxyUrl, { timeout: 3000 });
+      
+      if (check.status >= 200 && check.status < 400) {
+        return res.redirect(proxyUrl);
+      }
+    } catch (e) {
+      // Если сервер не отвечает, пробуем следующий
+    }
+  }
+
+  // Попытка 2: Прямое скачивание (если Invidious не сработал)
   try {
-    const videoId = req.params.id;
-    const { data, api } = await fetchPiped(`/streams/${videoId}`);
-    
-    if (!data.audioStreams || data.audioStreams.length === 0) {
-      throw new Error('Аудио не найдено');
-    }
-
-    // Ищем аудио в формате mp4 (его понимают все браузеры) или берем первое
-    const audio = data.audioStreams.find(s => s.mimeType.includes('audio/mp4')) || data.audioStreams[0];
-    
-    let url = audio.proxyUrl || audio.url;
-    
-    // Если ссылка относительная, добавляем домен
-    if (url.startsWith('/')) {
-      url = `${api}${url}`;
-    }
-
-    // Перенаправляем браузер напрямую на аудиофайл
-    res.redirect(url);
+    const stream = ytdl(videoId, { filter: 'audioonly', quality: 'highestaudio' });
+    res.setHeader('Content-Type', 'audio/mp4');
+    stream.pipe(res);
   } catch (err) {
-    console.error('Ошибка стриминга:', err.message);
+    console.error('Фатальная ошибка стриминга:', err.message);
     res.status(500).send('Ошибка стриминга');
   }
 });
