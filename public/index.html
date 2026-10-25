@@ -9,6 +9,7 @@
 </head>
 <body>
 
+  <!-- Боковая панель -->
   <aside class="sidebar">
     <div class="logo-wrapper">
       <div class="logo">Muzlo.</div>
@@ -33,9 +34,10 @@
       </ul>
     </nav>
 
-    <button id="import-btn" class="btn-import">Импорт</button>
+    <button id="import-btn" class="btn-import">Загрузить мои лайки</button>
   </aside>
 
+  <!-- Основной контент -->
   <main class="content">
     <header class="content-header">
       <h1 id="page-title">Все треки</h1>
@@ -44,11 +46,13 @@
       </div>
     </header>
 
+    <!-- Блок статистики (для профиля) -->
     <div id="profile-stats" style="display: none; margin-bottom: 20px; padding: 20px; background: #181818; border-radius: 12px; color: #fff;"></div>
     
     <div class="track-list" id="track-list"></div>
   </main>
 
+  <!-- Плеер -->
   <div class="player hidden">
     <div class="player-track-info">
       <img id="player-cover" src="" alt="Cover" class="player-cover hidden">
@@ -79,6 +83,7 @@
 
   <audio id="audio-player"></audio>
 
+  <!-- Модальное окно авторизации -->
   <div class="modal" id="auth-modal">
     <div class="modal-content">
       <span class="close-btn" id="btn-close-auth">&times;</span>
@@ -95,23 +100,23 @@
     </div>
   </div>
 
+  <!-- Модальное окно импорта -->
   <div class="modal" id="import-modal">
     <div class="modal-content">
       <span class="close-btn" id="btn-close-import">&times;</span>
-      <h2>Импорт</h2>
+      <h2>Импорт из SoundCloud</h2>
       
       <div style="text-align: left; background: #242424; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #b3b3b3;">
         <p style="margin-bottom: 10px; color: #fff; font-weight: bold;">Как это работает?</p>
-        <p style="margin-bottom: 10px;">Вы можете вставить ссылку на ваш профиль из <b>SoundCloud</b> или на плейлист из <b>Яндекс.Музыки</b>.</p>
         <ol style="margin-left: 20px; display: flex; flex-direction: column; gap: 8px;">
-          <li><b>Для SoundCloud:</b> скопируйте ссылку на ваш профиль. <br><span style="color:#1db954; font-size: 12px;">https://soundcloud.com/ваш_ник</span></li>
-          <li><b>Для Яндекс.Музыки:</b> откройте любой ваш плейлист, нажмите «Поделиться» и скопируйте ссылку. <br><span style="color:#1db954; font-size: 12px;">https://music.yandex.ru/users/ваш_ник/playlists/1</span></li>
-          <li>Вставьте ссылку в поле ниже и нажмите «Загрузить».</li>
+          <li>Зайдите на ваш профиль в SoundCloud.</li>
+          <li>Скопируйте ссылку из адресной строки. <br><span style="color:#1db954; font-size: 12px;">https://soundcloud.com/ваш_ник</span></li>
+          <li>Вставьте её в поле ниже и нажмите «Загрузить».</li>
         </ol>
-        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Для Яндекса: треки будут найдены в SoundCloud. Если их там нет — они не добавятся.</p>
+        <p style="margin-top: 10px; font-size: 12px; color: #ff4d4d;">* Профиль должен быть открытым.</p>
       </div>
       
-      <input type="text" id="import-url" placeholder="https://soundcloud.com/... или https://music.yandex.ru/...">
+      <input type="text" id="import-url" placeholder="https://soundcloud.com/ваш_ник">
       <button type="button" class="btn-submit" id="btn-do-import">Загрузить</button>
       <div id="import-status" style="margin-top: 15px; font-size: 14px;"></div>
     </div>

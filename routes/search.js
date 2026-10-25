@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import axios from 'axios';
-import cheerio from 'cheerio';
 import { createRequire } from 'module';
 import { query } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -102,9 +101,10 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна
+// 5. МОЯ ВОЛНА (Улучшенная)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
+    // 1. Берем топ-7 артистов из истории
     const topArtists = await query(
       `SELECT artist_name, COUNT(*) as play_count 
        FROM listening_history 
@@ -117,6 +117,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
 
     let baseArtists = topArtists.rows.map(r => r.artist_name);
 
+    // Если истории мало, добавляем артистов из медиатеки
     if (baseArtists.length < 5) {
       const liked = await query(
         'SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5',
@@ -125,10 +126,12 @@ router.get('/my-wave', requireAuth, async (req, res) => {
       baseArtists = [...new Set([...baseArtists, ...liked.rows.map(r => r.artist_name)])];
     }
 
+    // Если всё равно пусто, берем случайных популярных
     if (baseArtists.length === 0) {
       baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
     }
 
+    // 2. Добавляем случайных популярных артистов для разнообразия (3 штуки)
     const randomPopular = POPULAR_ARTISTS
       .sort(() => 0.5 - Math.random())
       .filter(a => !baseArtists.includes(a))
@@ -136,6 +139,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
     
     const allArtists = [...baseArtists, ...randomPopular];
 
+    // 3. Загружаем треки по всем артистам (до 10 от каждого)
     let allTracks = [];
     for (const artist of allArtists) {
       if (!artist || artist === 'Неизвестен') continue;
@@ -145,18 +149,23 @@ router.get('/my-wave', requireAuth, async (req, res) => {
           t.artist_name.toLowerCase().includes(artist.toLowerCase()) || 
           artist.toLowerCase().includes(t.artist_name.toLowerCase())
         );
+        // Берем до 10 треков, перемешиваем внутри артиста
         allTracks = allTracks.concat(filtered.sort(() => 0.5 - Math.random()).slice(0, 10));
       } catch (e) {}
     }
 
+    // 4. Финальное перемешивание
     const shuffled = allTracks.sort(() => 0.5 - Math.random());
+    
+    // 5. Ограничиваем до 40 треков
     res.json({ tracks: shuffled.slice(0, 40) });
   } catch (err) {
+    console.error('Ошибка волны:', err);
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
 });
 
-// 6. История прослушиваний
+// 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
@@ -172,7 +181,7 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// 7. Статистика для профиля
+// 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const totalTime = await query(
@@ -204,7 +213,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD
+// 8. Импорт лайков
 router.get('/import-likes', async (req, res) => {
   let profileUrl = req.query.url;
   if (!profileUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -227,73 +236,7 @@ router.get('/import-likes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
 });
 
-// 9. ИМПОРТ ИЗ ЯНДЕКС.МУЗЫКИ
-router.get('/import-yandex', async (req, res) => {
-  const url = req.query.url;
-  if (!url || !url.includes('music.yandex.ru')) {
-    return res.status(400).json({ error: 'Ссылка должна быть с music.yandex.ru' });
-  }
-
-  try {
-    const response = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-      timeout: 10000
-    });
-
-    const $ = cheerio.load(response.data);
-    const tracks = [];
-
-    // Пытаемся найти данные в JSON внутри страницы
-    const scripts = $('script[type="application/json"]').toArray();
-    let parsedData = null;
-
-    for (const script of scripts) {
-      try {
-        const content = $(script).html();
-        if (content && content.includes('playlist')) {
-          const data = JSON.parse(content);
-          if (data && data.playlist) {
-            parsedData = data.playlist;
-            break;
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (parsedData && parsedData.tracks) {
-      for (const track of parsedData.tracks) {
-        if (!track.title || !track.artists) continue;
-        
-        const title = track.title;
-        const artist = track.artists.map(a => a.name).join(', ');
-        const searchQuery = `${artist} - ${title}`;
-
-        try {
-          const found = await searchSoundCloud(searchQuery);
-          if (found.length > 0) {
-            const bestMatch = found.find(t => 
-              t.artist_name.toLowerCase().includes(artist.toLowerCase().split(',')[0]) ||
-              title.toLowerCase().includes(t.title.toLowerCase())
-            ) || found[0];
-
-            tracks.push(bestMatch);
-          }
-        } catch (e) {}
-      }
-    }
-
-    if (tracks.length === 0) {
-      return res.status(404).json({ error: 'Не удалось найти треки в плейлисте или они не найдены в SoundCloud' });
-    }
-
-    res.json({ tracks });
-  } catch (err) {
-    console.error('Ошибка импорта Яндекса:', err.message);
-    res.status(500).json({ error: 'Ошибка парсинга. Возможно, Яндекс заблокировал запрос.' });
-  }
-});
-
-// 10. Прокси картинок
+// 9. Прокси картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -305,7 +248,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 11. Стриминг
+// 10. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;

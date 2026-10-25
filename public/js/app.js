@@ -92,7 +92,7 @@ async function performSearch(query) {
   }
 }
 
-// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА
+// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА (ИСПРАВЛЕНО)
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -120,16 +120,21 @@ async function restorePlayerState() {
     currentTrackRealDuration = track.duration || 0;
     totalTimeEl.textContent = formatTime(currentTrackRealDuration);
     
+    // Загружаем источник, но НЕ включаем
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
-    btnPlay.textContent = '▶';
+    btnPlay.textContent = '▶'; // Кнопка Play
 
+    // Как только метаданные загрузятся, ставим сохраненную позицию
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
         audioPlayer.currentTime = savedTime;
         currentTimeEl.textContent = formatTime(savedTime);
       }
     }, { once: true });
+
+    // Если пользователь нажмет Play, браузер разблокирует автовоспроизведение
+    // и продолжит с того же места.
 
   } catch (e) {}
 }
@@ -247,7 +252,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
+// 6. ВОСПРОИЗВЕДЕНИЕ (С записью в историю)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -275,6 +280,7 @@ function playTrack(track) {
     btnPlay.textContent = '⏸';
     savePlayerState();
     
+    // ЗАПИСЬ В ИСТОРИЮ
     fetch('/api/search/history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -559,44 +565,31 @@ importModal.addEventListener('click', (e) => { if (e.target === importModal) imp
 
 btnDoImport.addEventListener('click', async () => {
   const url = importUrlInput.value.trim();
-  
-  if (!url) {
+  if (!url || !url.includes('soundcloud.com')) {
     importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Введите ссылку';
-    return;
-  }
-
-  let endpoint = '';
-  if (url.includes('soundcloud.com')) {
-    endpoint = `/api/search/import-likes?url=${encodeURIComponent(url)}`;
-  } else if (url.includes('music.yandex.ru')) {
-    endpoint = `/api/search/import-yandex?url=${encodeURIComponent(url)}`;
-  } else {
-    importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Поддерживаются только SoundCloud и Яндекс.Музыка';
+    importStatus.textContent = 'Введите корректную ссылку (https://soundcloud.com/...)';
     return;
   }
 
   importStatus.style.color = '#1db954'; 
-  importStatus.textContent = 'Загрузка... Пожалуйста, подождите (это может занять до 30 секунд).';
+  importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
   btnDoImport.disabled = true;
 
   try {
-    const res = await fetch(endpoint);
+    const res = await fetch(`/api/search/import-likes?url=${encodeURIComponent(url)}`);
     const data = await res.json();
 
     if (data.tracks && data.tracks.length > 0) {
-      importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
-      
+      importStatus.textContent = `Успех! Загружено треков: ${data.tracks.length}`;
       setTimeout(() => {
         importModal.classList.remove('active');
-        switchTab(navSearch, 'Импортированные треки', false);
+        switchTab(navSearch, 'Мои лайки', false);
         renderTracks(data.tracks);
         btnDoImport.disabled = false;
       }, 1500);
     } else {
       importStatus.style.color = '#ff4d4d';
-      importStatus.textContent = data.error || 'Треки не найдены. Проверьте ссылку.';
+      importStatus.textContent = 'Лайки не найдены. Проверьте ссылку или откройте профиль.';
       btnDoImport.disabled = false;
     }
   } catch (err) {
