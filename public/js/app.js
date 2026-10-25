@@ -34,6 +34,7 @@ let currentTracks = [];
 let currentTrackIndex = -1;
 let isPlaying = false;
 let isLoginMode = true;
+let currentTrackRealDuration = 0; // Храним настоящую длительность трека
 
 // ==========================================
 // 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -47,18 +48,18 @@ const formatTime = (seconds) => {
 
 const getValidCover = (url) => url || '/img/default-cover.png';
 
-// ГЛАВНАЯ ФУНКЦИЯ: Определяет, откуда брать аудио
+// Определяет, откуда брать аудио
 function getStreamUrl(track) {
-  // 1. Если бэкенд уже дал прямую ссылку (SoundCloud)
+  // 1. Если есть готовая ссылка (SoundCloud или медиатека)
   if (track.stream_url) return track.stream_url; 
-  // 2. Если это внешний трек с прямой ссылкой (Audius/iTunes)
+  // 2. Если это внешний трек с прямой ссылкой
   if (track.is_external && track.file_url) return track.file_url; 
   
-  // 3. Если это локальный трек, загруженный на сервер
+  // 3. Для локальных треков
   return `/api/tracks/${track.id}/stream`;
 }
 
-// Функция fetch с таймаутом (защита от зависаний сервера)
+// Функция fetch с таймаутом
 async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
@@ -73,7 +74,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. РЕНДЕР ТРЕКОВ (С КАРТИНКАМИ И ЛАЙКАМИ)
+// 3. РЕНДЕР ТРЕКОВ
 // ==========================================
 function renderTracks(tracksArray) {
   currentTracks = tracksArray || [];
@@ -89,7 +90,6 @@ function renderTracks(tracksArray) {
     div.className = 'track-item';
     div.dataset.index = index;
     
-    // Используем referrerpolicy, чтобы картинки грузились без блокировок
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
       <div class="track-info">
@@ -100,14 +100,14 @@ function renderTracks(tracksArray) {
       <button class="btn-like" title="Сохранить в медиатеку">♥</button>
     `;
 
-    // Умная замена битой картинки на локальную
+    // Замена битой картинки на локальную
     const imgEl = div.querySelector('.track-cover');
     imgEl.onerror = function() {
       this.onerror = null; 
       this.src = '/img/default-cover.png';
     };
 
-    // Клик по треку (воспроизведение)
+    // Клик по треку
     div.addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-like')) return; 
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
@@ -116,7 +116,7 @@ function renderTracks(tracksArray) {
       playTrack(track);
     });
 
-    // Клик по сердечку (сохранение в медиатеку)
+    // Клик по лайку
     const likeBtn = div.querySelector('.btn-like');
     likeBtn.addEventListener('click', async () => {
       try {
@@ -140,6 +140,13 @@ function renderTracks(tracksArray) {
           authModal.classList.add('active');
           return;
         }
+        
+        if (!res.ok) {
+          const errData = await res.json();
+          alert(errData.error); 
+          return;
+        }
+
         if (res.ok) {
           likeBtn.classList.add('liked');
           likeBtn.textContent = '❤';
@@ -152,13 +159,12 @@ function renderTracks(tracksArray) {
 }
 
 // ==========================================
-// 4. УПРАВЛЕНИЕ ПЛЕЕРОМ
+// 4. УПРАВЛЕНИЕ ПЛЕЕРОМ (Асинхронная функция)
 // ==========================================
-function playTrack(track) {
+async function playTrack(track) {
   playerTitle.textContent = track.title;
   playerArtist.textContent = track.artist_name || 'Неизвестен';
   
-  // Установка обложки в плеере
   if (track.cover_url) {
     playerCover.src = track.cover_url;
     playerCover.classList.remove('hidden');
@@ -166,10 +172,25 @@ function playTrack(track) {
     playerCover.classList.add('hidden');
   }
 
-  // Установка источника аудио
+  // Устанавливаем временную длительность из поиска
+  currentTrackRealDuration = track.duration || 0;
+  totalTimeEl.textContent = formatTime(currentTrackRealDuration);
+  seekSlider.value = 0;
+
   audioPlayer.src = getStreamUrl(track);
   
-  // Воспроизведение
+  // Если у трека есть ссылка на SoundCloud, запрашиваем точную длительность
+  if (track.permalink_url) {
+    try {
+      const res = await fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`);
+      const data = await res.json();
+      if (data.duration) {
+        currentTrackRealDuration = data.duration;
+        totalTimeEl.textContent = formatTime(data.duration);
+      }
+    } catch (e) { console.log('Не удалось получить точную длительность'); }
+  }
+  
   audioPlayer.play().then(() => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
@@ -205,26 +226,32 @@ btnPrev.addEventListener('click', () => {
   document.querySelector(`.track-item[data-index="${prevIndex}"]`)?.click();
 });
 
+// Обновление ползунка с использованием currentTrackRealDuration
 audioPlayer.addEventListener('timeupdate', () => {
-  if (!audioPlayer.duration) return;
-  seekSlider.value = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  if (!duration || isNaN(duration)) return;
+  
+  seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
 });
 
+// Применяем длительность, как только она загрузится
 audioPlayer.addEventListener('loadedmetadata', () => {
-  totalTimeEl.textContent = formatTime(audioPlayer.duration);
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  totalTimeEl.textContent = formatTime(duration);
 });
 
+// Перемотка
 seekSlider.addEventListener('input', () => {
-  if (!audioPlayer.duration) return;
-  audioPlayer.currentTime = (seekSlider.value / 100) * audioPlayer.duration;
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  if (!duration) return;
+  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
 });
 
 volumeSlider.addEventListener('input', () => {
   audioPlayer.volume = volumeSlider.value;
 });
 
-// Автоматическое включение следующего трека
 audioPlayer.addEventListener('ended', () => btnNext.click());
 
 // ==========================================
@@ -237,7 +264,7 @@ function switchTab(activeTab, title, showSearch = false) {
   searchContainer.style.display = showSearch ? 'block' : 'none';
 }
 
-// 1. Главная (Рекомендации)
+// 1. Главная
 navHome.addEventListener('click', async () => {
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
@@ -247,7 +274,7 @@ navHome.addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error);
     renderTracks(data.tracks);
   } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает. Проверьте терминал.</p>';
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает.</p>';
   }
 });
 
@@ -255,7 +282,7 @@ navHome.addEventListener('click', async () => {
 navSearch.addEventListener('click', () => {
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите название трека...</p>';
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите название...</p>';
 });
 
 let searchTimeout;
@@ -277,7 +304,7 @@ searchInput.addEventListener('input', (e) => {
       if (!res.ok) throw new Error(data.error);
       renderTracks(data.tracks);
     } catch (err) {
-      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска. Сервер не отвечает.</p>';
+      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска.</p>';
     }
   }, 600);
 });
@@ -289,13 +316,13 @@ navLibrary.addEventListener('click', async () => {
   try {
     const res = await fetchWithTimeout('/api/library');
     if (res.status === 401) {
-      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт, чтобы увидеть медиатеку.</p>';
+      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
       return;
     }
     const data = await res.json();
     renderTracks(data.tracks);
   } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки медиатеки.</p>';
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 });
 
@@ -348,8 +375,6 @@ authForm.addEventListener('submit', async (e) => {
     authModal.classList.remove('active');
     updateAuthUI(data.user);
     authForm.reset();
-    
-    // Если мы в медиатеке, обновляем её после входа
     if (navLibrary.classList.contains('active')) navLibrary.click();
   } catch (err) {
     alert(err.message);
@@ -359,7 +384,7 @@ authForm.addEventListener('submit', async (e) => {
 async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });
   updateAuthUI(null);
-  navHome.click(); // Возвращаемся на главную
+  navHome.click();
 }
 
 async function checkAuth() {
@@ -373,7 +398,7 @@ async function checkAuth() {
 }
 
 // ==========================================
-// 7. ЗАПУСК ПРИ ЗАГРУЗКЕ
+// 7. СТАРТ
 // ==========================================
 checkAuth();
-navHome.click(); // Сразу грузим главную страницу с рекомендациями
+navHome.click();
