@@ -19,6 +19,7 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
+// Вспомогательная функция поиска в SoundCloud
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
@@ -231,7 +232,7 @@ router.get('/import-likes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
 });
 
-// 9. Импорт из Яндекс.Музыки (API + Jina AI)
+// 9. Импорт из Яндекс.Музыки (через прокси/API)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) {
@@ -240,7 +241,6 @@ router.get('/import-yandex', async (req, res) => {
 
   let parsedTracks = [];
 
-  // 1. Формируем правильный URL к внутреннему API Яндекса
   let apiUrl = null;
   if (url.includes('/users/')) {
     const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
@@ -250,7 +250,6 @@ router.get('/import-yandex', async (req, res) => {
     if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?uuid=${match[1]}&lang=ru`;
   }
 
-  // 2. Пробуем разные прокси для запроса к API
   if (apiUrl) {
     const PROXIES = [
       `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(apiUrl)}`,
@@ -260,63 +259,43 @@ router.get('/import-yandex', async (req, res) => {
 
     for (const proxyUrl of PROXIES) {
       try {
-        console.log(`[Yandex API] Пробуем: ${proxyUrl}`);
         const response = await axios.get(proxyUrl, {
-          headers: { 
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
-          },
+          headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
           timeout: 8000
         });
-
         if (response.data && response.data.playlist && response.data.playlist.tracks) {
           parsedTracks = response.data.playlist.tracks;
-          console.log(`[Yandex API] ✅ Успех через прокси! Найдено: ${parsedTracks.length}`);
           break;
         }
-      } catch (err) {
-        console.log(`[Yandex API] ❌ Ошибка прокси: ${err.message}`);
-      }
+      } catch (err) {}
     }
   }
 
-  // 3. Если API не сработал, пробуем Jina AI
   if (parsedTracks.length === 0) {
     try {
-      console.log('[Yandex Jina] Пробуем Jina AI...');
       const jinaUrl = `https://r.jina.ai/${url}`;
       const response = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 30000 });
-      
       const lines = response.data.split('\n');
       for (const line of lines) {
         const cleanLine = line.replace(/\[|\]\(.*?\)|\d+\.\s*/g, '').trim();
         if (cleanLine.includes(' - ') && cleanLine.length > 3 && cleanLine.length < 150 && !cleanLine.includes('http')) {
           const parts = cleanLine.split(' - ');
-          if (parts.length >= 2) {
-            parsedTracks.push({ title: parts[1].trim(), artists: [{ name: parts[0].trim() }] });
-          }
+          if (parts.length >= 2) parsedTracks.push({ title: parts[1].trim(), artists: [{ name: parts[0].trim() }] });
         }
       }
-      console.log(`[Yandex Jina] Найдено: ${parsedTracks.length}`);
-    } catch (err) {
-      console.log('[Yandex Jina] ❌ Ошибка:', err.message);
-    }
+    } catch (err) {}
   }
 
   if (parsedTracks.length === 0) {
     return res.status(404).json({ error: 'Яндекс блокирует все прокси. Попробуйте SoundCloud.' });
   }
 
-  // 4. Ищем найденные треки в SoundCloud
   const tracks = [];
   for (const track of parsedTracks) {
     if (!track.title) continue;
-    const title = track.title;
     const artist = track.artists ? track.artists.map(a => a.name).join(', ') : 'Неизвестен';
-    const searchQuery = `${artist} - ${title}`;
-
     try {
-      const found = await searchSoundCloud(searchQuery);
+      const found = await searchSoundCloud(`${artist} - ${track.title}`);
       if (found.length > 0) tracks.push(found[0]);
     } catch (e) {}
   }
@@ -328,7 +307,31 @@ router.get('/import-yandex', async (req, res) => {
   res.json({ tracks });
 });
 
-// 10. Прокси картинок
+// 10. ИМПОРТ ИЗ ТЕКСТА (Список треков)
+router.post('/import-text', async (req, res) => {
+  const { text } = req.body;
+  if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список треков' });
+
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+  const tracks = [];
+
+  for (const line of lines) {
+    try {
+      const found = await searchSoundCloud(line);
+      if (found.length > 0) {
+        tracks.push(found[0]);
+      }
+    } catch (e) {}
+  }
+
+  if (tracks.length === 0) {
+    return res.status(404).json({ error: 'Ничего не найдено в SoundCloud. Проверьте формат: Артист - Название' });
+  }
+
+  res.json({ tracks });
+});
+
+// 11. Прокси картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -340,7 +343,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 11. Стриминг
+// 12. Стриминг аудио
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
