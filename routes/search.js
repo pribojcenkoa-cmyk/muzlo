@@ -10,7 +10,6 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
-// Список популярных артистов для рекомендаций
 const POPULAR_ARTISTS = [
   'Onda Andar', 'Sematary', 'Kizaru', 'Miyagi', 'Andy Panda', 'Scriptonite', 
   'Boulevard Depo', 'Pharaoh', 'FACE', 'LSP', 'Markul', 'T-Fest', 
@@ -233,165 +232,105 @@ router.get('/import-likes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
 });
 
-// 9. Импорт из Яндекс.Музыки (мульти-прокси + глубокий парсинг)
+// 9. Импорт из Яндекс.Музыки (API + Jina AI)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) {
     return res.status(400).json({ error: 'Ссылка должна быть с music.yandex.ru' });
   }
 
-  const PROXIES = [
-    'https://api.codetabs.com/v1/proxy?quest=',
-    'https://corsproxy.io/?',
-    'https://api.allorigins.win/raw?url=',
-    'https://thingproxy.freeboard.io/fetch/'
-  ];
+  let parsedTracks = [];
 
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8'
-  };
-
-  let htmlContent = null;
-
-  for (const proxy of PROXIES) {
-    try {
-      console.log(`[Yandex] Пробуем прокси: ${proxy}`);
-      const targetUrl = proxy + encodeURIComponent(url);
-      const response = await axios.get(targetUrl, { headers, timeout: 12000 });
-      
-      if (response.data && response.data.length > 5000) {
-        console.log(`[Yandex] ✅ Прокси сработал, размер HTML: ${response.data.length}`);
-        htmlContent = response.data;
-        break;
-      } else {
-        console.log(`[Yandex] ❌ Пустой ответ от прокси`);
-      }
-    } catch (err) {
-      console.log(`[Yandex] ❌ Прокси не сработал: ${err.message}`);
-    }
-  }
-
-  if (!htmlContent) {
-    try {
-      console.log('[Yandex] Пробуем прямой запрос...');
-      const response = await axios.get(url, { headers, timeout: 10000 });
-      if (response.data && response.data.length > 5000) {
-        htmlContent = response.data;
-        console.log(`[Yandex] ✅ Прямой запрос сработал, размер: ${htmlContent.length}`);
-      }
-    } catch (err) {
-      console.log(`[Yandex] ❌ Прямой запрос не сработал: ${err.message}`);
-    }
-  }
-
-  if (!htmlContent) {
-    return res.status(500).json({ error: 'Все прокси и прямой запрос заблокированы Яндексом.' });
-  }
-
+  // СПОСОБ 1: Внутренний JSON API Яндекса
   try {
-    const $ = cheerio.load(htmlContent);
-    let parsedTracks = [];
-
-    // СПОСОБ 1: JSON в script[type="application/json"]
-    $('script[type="application/json"]').each((i, el) => {
-      if (parsedTracks.length > 0) return;
-      try {
-        const content = $(el).html();
-        if (!content || !content.includes('title')) return;
-        const data = JSON.parse(content);
-        const findTracks = (obj) => {
-          if (!obj || typeof obj !== 'object' || parsedTracks.length > 0) return;
-          if (Array.isArray(obj) && obj.length > 0 && obj[0].title && (obj[0].artists || obj[0].artist)) {
-            parsedTracks = obj;
-            return;
-          }
-          for (const key in obj) {
-            findTracks(obj[key]);
-            if (parsedTracks.length > 0) return;
-          }
-        };
-        findTracks(data);
-      } catch (e) {}
-    });
-
-    // СПОСОБ 2: Inline JSON (window.__INITIAL_STATE__)
-    if (parsedTracks.length === 0) {
-      $('script:not([src])').each((i, el) => {
-        if (parsedTracks.length > 0) return;
-        try {
-          const content = $(el).html();
-          if (!content || content.length < 1000 || !content.includes('"title"')) return;
-
-          const matches = content.match(/\{[\s\S]{500,}?\}/g);
-          if (!matches) return;
-
-          for (const m of matches) {
-            try {
-              const data = JSON.parse(m);
-              const findTracks = (obj) => {
-                if (!obj || typeof obj !== 'object' || parsedTracks.length > 0) return;
-                if (Array.isArray(obj) && obj.length > 0 && obj[0].title && (obj[0].artists || obj[0].artist)) {
-                  parsedTracks = obj;
-                  return;
-                }
-                for (const key in obj) {
-                  findTracks(obj[key]);
-                  if (parsedTracks.length > 0) return;
-                }
-              };
-              findTracks(data);
-            } catch (e) {}
-          }
-        } catch (e) {}
-      });
+    let apiUrl = null;
+    if (url.includes('/users/')) {
+      const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
+      if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${match[1]}&kinds=${match[2]}`;
+    } else if (url.includes('/playlists/')) {
+      const match = url.match(/playlists\/([a-zA-Z0-9-]+)/);
+      if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?uuid=${match[1]}`;
     }
 
-    // СПОСОБ 3: Регулярные выражения (парсим сырой HTML)
-    if (parsedTracks.length === 0) {
-      const regex = /"title":"([^"]+)","artists":\[\{"name":"([^"]+)"/g;
-      let match;
-      while ((match = regex.exec(htmlContent)) !== null) {
-        parsedTracks.push({ title: match[1], artists: [{ name: match[2] }] });
-        if (parsedTracks.length > 100) break;
+    if (apiUrl) {
+      console.log('[Yandex API] Запрос к:', apiUrl);
+      const response = await axios.get(apiUrl, {
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'Accept': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      if (response.data && response.data.playlist && response.data.playlist.tracks) {
+        parsedTracks = response.data.playlist.tracks;
+        console.log(`[Yandex API] ✅ Успех! Найдено треков: ${parsedTracks.length}`);
       }
     }
-
-    console.log(`[Yandex] Итого найдено в плейлисте: ${parsedTracks.length} треков`);
-
-    if (parsedTracks.length === 0) {
-      return res.status(404).json({ error: 'Не удалось распарсить плейлист. Возможно, ссылка приватная или имеет неверный формат.' });
-    }
-
-    const tracks = [];
-    for (const track of parsedTracks) {
-      if (!track.title) continue;
-      const title = track.title;
-      const artist = track.artists ? track.artists.map(a => a.name).join(', ') : (track.artist || 'Неизвестен');
-      const searchQuery = `${artist} - ${title}`;
-
-      try {
-        const found = await searchSoundCloud(searchQuery);
-        if (found.length > 0) {
-          const bestMatch = found.find(t => 
-            t.artist_name.toLowerCase().includes(artist.toLowerCase().split(',')[0]) ||
-            title.toLowerCase().includes(t.title.toLowerCase())
-          ) || found[0];
-          tracks.push(bestMatch);
-        }
-      } catch (e) {}
-    }
-
-    if (tracks.length === 0) {
-      return res.status(404).json({ error: `Найдено ${parsedTracks.length} треков в плейлисте, но ни один не найден в SoundCloud.` });
-    }
-
-    res.json({ tracks });
   } catch (err) {
-    console.error('Ошибка парсинга Яндекса:', err.message);
-    res.status(500).json({ error: 'Ошибка парсинга HTML.' });
+    console.log('[Yandex API] ❌ Не сработал:', err.message);
   }
+
+  // СПОСОБ 2: Jina AI Reader (выполняет JS и возвращает текст)
+  if (parsedTracks.length === 0) {
+    try {
+      console.log('[Yandex Jina] Пробуем через Jina AI...');
+      const jinaUrl = `https://r.jina.ai/${url}`;
+      const response = await axios.get(jinaUrl, { 
+        headers: { 'Accept': 'text/plain' },
+        timeout: 30000
+      });
+      
+      const text = response.data;
+      console.log('[Yandex Jina] Ответ получен, длина:', text.length);
+
+      const lines = text.split('\n');
+      for (const line of lines) {
+        // Очищаем строку от Markdown-тегов и нумерации
+        const cleanLine = line.replace(/\[|\]\(.*?\)|\d+\.\s*/g, '').trim(); 
+        
+        // Если есть разделитель " - " и длина адекватная, считаем это треком
+        if (cleanLine.includes(' - ') && cleanLine.length > 3 && cleanLine.length < 100) {
+          const parts = cleanLine.split(' - ');
+          if (parts.length >= 2) {
+            parsedTracks.push({
+              title: parts[1].trim(),
+              artists: [{ name: parts[0].trim() }]
+            });
+          }
+        }
+      }
+      console.log(`[Yandex Jina] Найдено треков: ${parsedTracks.length}`);
+    } catch (err) {
+      console.log('[Yandex Jina] ❌ Ошибка:', err.message);
+    }
+  }
+
+  if (parsedTracks.length === 0) {
+    return res.status(404).json({ error: 'Не удалось найти треки. Яндекс блокирует запросы или плейлист пуст.' });
+  }
+
+  // Ищем треки в SoundCloud
+  const tracks = [];
+  for (const track of parsedTracks) {
+    if (!track.title) continue;
+    const title = track.title;
+    const artist = track.artists ? track.artists.map(a => a.name).join(', ') : 'Неизвестен';
+    const searchQuery = `${artist} - ${title}`;
+
+    try {
+      const found = await searchSoundCloud(searchQuery);
+      if (found.length > 0) {
+        tracks.push(found[0]); // Берем первый результат
+      }
+    } catch (e) {}
+  }
+
+  if (tracks.length === 0) {
+    return res.status(404).json({ error: 'Ни один из треков плейлиста не найден в SoundCloud.' });
+  }
+
+  res.json({ tracks });
 });
 
 // 10. Прокси для картинок
