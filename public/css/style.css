@@ -32,7 +32,7 @@ body {
 }
 
 /* ==========================================
-   БОКОВАЯ ПАНЕЛЬ
+   БОКОВАЯ ПАНЕЛЬ (DESKTOP)
    ========================================== */
 .sidebar {
   background-color: var(--bg-sidebar);
@@ -138,7 +138,7 @@ body {
 #import-btn:hover { background-color: #e64a00; transform: scale(1.02); }
 
 /* ==========================================
-   КОНТЕНТ
+   ОСНОВНОЙ КОНТЕНТ
    ========================================== */
 .content {
   background: linear-gradient(to bottom, #1f1f1f, var(--bg-main));
@@ -220,7 +220,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   body {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto 1fr; 
     height: 100vh;
     overflow: hidden;
     padding-bottom: 0;
@@ -229,6 +229,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     overflow-x: hidden;
   }
 
+  /* --- ШАПКА --- */
   .sidebar {
     display: flex;
     flex-direction: row;
@@ -254,10 +255,25 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .sidebar .profile-info span { margin-bottom: 0; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sidebar .btn-logout { width: auto; background: none; padding: 0; }
 
+  /* --- НАВИГАЦИЯ --- */
   .sidebar nav { order: 3; width: 100%; margin-top: 5px; }
-  .sidebar nav ul { display: flex; flex-direction: row; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .sidebar nav ul {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
   .sidebar nav ul::-webkit-scrollbar { display: none; }
-  .sidebar nav li { padding: 6px 14px; white-space: nowrap; font-size: 13px; background-color: #242424; border-radius: 20px; color: var(--text-muted); }
+  .sidebar nav li {
+    padding: 6px 14px;
+    white-space: nowrap;
+    font-size: 13px;
+    background-color: #242424;
+    border-radius: 20px;
+    color: var(--text-muted);
+  }
   .sidebar nav li.active { background-color: var(--accent); color: #000; font-weight: bold; }
 
   #import-btn {
@@ -269,6 +285,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     border-radius: 20px;
   }
 
+  /* --- КОНТЕНТ --- */
   .content {
     padding: 15px;
     overflow-y: auto;
@@ -283,6 +300,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .search-box { width: 100%; margin-top: 5px; }
   .search-box input { width: 100%; padding: 10px 15px; font-size: 14px; box-sizing: border-box; }
 
+  /* --- СПИСОК ТРЕКОВ --- */
   .track-item { padding: 8px; gap: 8px; border-radius: 6px; max-width: 100%; overflow: hidden; }
   .track-cover { width: 45px; height: 45px; border-radius: 4px; flex-shrink: 0; }
   .track-info { flex: 1; min-width: 0; }
@@ -291,12 +309,13 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .track-duration { display: none; }
   .btn-like, .btn-delete { font-size: 18px; padding: 0 4px; flex-shrink: 0; }
 
+  /* --- ПЛЕЕР (ВЫЕЗЖАЕТ СНИЗУ) --- */
   .player {
     position: fixed;
     bottom: 0;
     left: 0;
     width: 100vw;
-    height: 70px;
+    height: 75px; 
     padding: 8px 12px;
     flex-direction: row;
     align-items: center;
@@ -317,11 +336,29 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .player-cover { width: 40px; height: 40px; margin-right: 10px; flex-shrink: 0; }
   .player-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .player-artist { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   .player-controls { width: auto; flex-direction: row; align-items: center; gap: 15px; flex-shrink: 0; }
-  .player-progress, .player-volume { display: none; }
+  
+  .player-progress { display: none; }
+
   .player-buttons { margin-bottom: 0; gap: 12px; }
   .control-btn { font-size: 18px; }
   .play-btn { width: 36px; height: 36px; font-size: 16px; }
+
+  /* ВОЗВРАЩАЕМ ГРОМКОСТЬ НА МОБИЛКЕ */
+  .player-volume {
+    display: flex;
+    width: 70px;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .player-volume span, #volume-label {
+    display: none; 
+  }
+  .player-volume input {
+    width: 60px; 
+    height: 4px;
+  }
 
   .modal-content { width: 90%; padding: 20px; }
 }
