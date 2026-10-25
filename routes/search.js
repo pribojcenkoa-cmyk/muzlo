@@ -18,9 +18,9 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-async function searchSoundCloud(query, offset = 0) {
+async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
-    query: query, resourceType: 'tracks', limit: 50, offset: offset
+    query: q, resourceType: 'tracks', limit: 50, offset: offset
   });
 
   return searchResult.collection
@@ -43,6 +43,7 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
+// 1. Рекомендации
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
@@ -59,6 +60,7 @@ router.get('/trending', async (req, res) => {
   }
 });
 
+// 2. Поиск
 router.get('/', async (req, res) => {
   const q = req.query.q;
   if (!q) return res.json({ tracks: [] });
@@ -70,6 +72,7 @@ router.get('/', async (req, res) => {
   }
 });
 
+// 3. Инфо
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -81,6 +84,7 @@ router.get('/info', async (req, res) => {
   }
 });
 
+// 4. Страница артиста
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
@@ -97,55 +101,71 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. МОЯ ВОЛНА (Умная, на основе истории прослушиваний)
+// 5. МОЯ ВОЛНА (Улучшенная)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
-    // Берем ТОП-5 артистов, которых пользователь слушал чаще всего
+    // 1. Берем топ-7 артистов из истории
     const topArtists = await query(
       `SELECT artist_name, COUNT(*) as play_count 
        FROM listening_history 
        WHERE user_id = $1 AND artist_name IS NOT NULL 
        GROUP BY artist_name 
        ORDER BY play_count DESC 
-       LIMIT 5`,
+       LIMIT 7`,
       [req.user.id]
     );
 
-    if (topArtists.rows.length === 0) {
-      // Если истории нет, берем из лайков
+    let baseArtists = topArtists.rows.map(r => r.artist_name);
+
+    // Если истории мало, добавляем артистов из медиатеки
+    if (baseArtists.length < 5) {
       const liked = await query(
         'SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5',
         [req.user.id]
       );
-      if (liked.rows.length === 0) return res.status(400).json({ error: 'Слушайте музыку или добавляйте в медиатеку!' });
-      
-      let tracks = [];
-      for (const row of liked.rows) {
-        const found = await searchSoundCloud(row.artist_name);
-        tracks = tracks.concat(found.slice(0, 5));
-      }
-      return res.json({ tracks: tracks.sort(() => 0.5 - Math.random()) });
+      baseArtists = [...new Set([...baseArtists, ...liked.rows.map(r => r.artist_name)])];
     }
 
-    // Ищем треки по ТОП-артистам из истории
+    // Если всё равно пусто, берем случайных популярных
+    if (baseArtists.length === 0) {
+      baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
+    }
+
+    // 2. Добавляем случайных популярных артистов для разнообразия (3 штуки)
+    const randomPopular = POPULAR_ARTISTS
+      .sort(() => 0.5 - Math.random())
+      .filter(a => !baseArtists.includes(a))
+      .slice(0, 3);
+    
+    const allArtists = [...baseArtists, ...randomPopular];
+
+    // 3. Загружаем треки по всем артистам (до 10 от каждого)
     let allTracks = [];
-    for (const row of topArtists.rows) {
-      if (!row.artist_name || row.artist_name === 'Неизвестен') continue;
-      const tracks = await searchSoundCloud(row.artist_name);
-      const filtered = tracks.filter(t => 
-        t.artist_name.toLowerCase().includes(row.artist_name.toLowerCase()) || 
-        row.artist_name.toLowerCase().includes(t.artist_name.toLowerCase())
-      );
-      allTracks = allTracks.concat(filtered.slice(0, 5));
+    for (const artist of allArtists) {
+      if (!artist || artist === 'Неизвестен') continue;
+      try {
+        const tracks = await searchSoundCloud(artist);
+        const filtered = tracks.filter(t => 
+          t.artist_name.toLowerCase().includes(artist.toLowerCase()) || 
+          artist.toLowerCase().includes(t.artist_name.toLowerCase())
+        );
+        // Берем до 10 треков, перемешиваем внутри артиста
+        allTracks = allTracks.concat(filtered.sort(() => 0.5 - Math.random()).slice(0, 10));
+      } catch (e) {}
     }
 
-    res.json({ tracks: allTracks.sort(() => 0.5 - Math.random()) });
+    // 4. Финальное перемешивание
+    const shuffled = allTracks.sort(() => 0.5 - Math.random());
+    
+    // 5. Ограничиваем до 40 треков
+    res.json({ tracks: shuffled.slice(0, 40) });
   } catch (err) {
+    console.error('Ошибка волны:', err);
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
 });
 
-// НОВЫЙ РОУТ: Сохранение истории прослушивания
+// 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
@@ -161,16 +181,14 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// НОВЫЙ РОУТ: Статистика для профиля
+// 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
-    // Общее время (в секундах)
     const totalTime = await query(
       'SELECT SUM(duration) as total FROM listening_history WHERE user_id = $1',
       [req.user.id]
     );
     
-    // Топ артистов
     const topArtists = await query(
       `SELECT artist_name, COUNT(*) as count FROM listening_history 
        WHERE user_id = $1 AND artist_name IS NOT NULL 
@@ -178,7 +196,6 @@ router.get('/stats', requireAuth, async (req, res) => {
       [req.user.id]
     );
 
-    // Топ треков
     const topTracks = await query(
       `SELECT title, artist_name, COUNT(*) as count FROM listening_history 
        WHERE user_id = $1 
@@ -196,7 +213,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// Импорт и стриминг остаются без изменений...
+// 8. Импорт лайков
 router.get('/import-likes', async (req, res) => {
   let profileUrl = req.query.url;
   if (!profileUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -219,6 +236,7 @@ router.get('/import-likes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
 });
 
+// 9. Прокси картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -230,6 +248,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
+// 10. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
