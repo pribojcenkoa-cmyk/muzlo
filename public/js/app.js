@@ -205,7 +205,7 @@ async function loadArtistPage(artistName) {
 }
 
 // ==========================================
-// 6. ПЛЕЕР
+// 6. ПЛЕЕР (Аудио запускается МГНОВЕННО)
 // ==========================================
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
