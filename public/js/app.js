@@ -1,4 +1,12 @@
 // ==========================================
+// 0. ОЧИСТКА СТАРОГО КЭША (ВЕРСИЯ 2.0)
+// ==========================================
+if (localStorage.getItem('muzlo_version') !== '2.0') {
+  localStorage.clear();
+  localStorage.setItem('muzlo_version', '2.0');
+}
+
+// ==========================================
 // 1. ИНИЦИАЛИЗАЦИЯ
 // ==========================================
 const audioPlayer = document.getElementById('audio-player');
@@ -205,7 +213,7 @@ async function loadArtistPage(artistName) {
 }
 
 // ==========================================
-// 6. ПЛЕЕР (Аудио запускается МГНОВЕННО)
+// 6. ПЛЕЕР
 // ==========================================
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
@@ -237,6 +245,11 @@ function playTrack(track) {
     console.error('Ошибка аудио:', err);
     btnPlay.textContent = '▶';
     isPlaying = false;
+
+    if (err.name === 'NotSupportedError' && currentTracks.length > 1) {
+      alert('Этот трек недоступен (битая ссылка). Включаем следующий...');
+      btnNext.click();
+    }
   });
 }
 
