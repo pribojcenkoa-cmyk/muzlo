@@ -1,8 +1,8 @@
-// Очистка старого кэша (от битых VK/Audius треков)
-if (localStorage.getItem('muzlo_version') !== '4.0') {
+// Очистка старого кэша
+if (localStorage.getItem('muzlo_version') !== '6.0') {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
-  localStorage.setItem('muzlo_version', '4.0');
+  localStorage.setItem('muzlo_version', '6.0');
 }
 
 // 1. ИНИЦИАЛИЗАЦИЯ
@@ -33,6 +33,8 @@ let currentTrackIndex = -1;
 let isPlaying = false;
 let isLoginMode = true;
 let currentTrackRealDuration = 0;
+let isSeeking = false;
+let lastSearchQuery = ''; // Запоминаем последний поиск
 
 // 2. УТИЛИТЫ
 const formatTime = (seconds) => {
@@ -45,8 +47,8 @@ const formatTime = (seconds) => {
 const getValidCover = (url) => url || '/img/default-cover.png';
 
 function getStreamUrl(track) {
-  if (track.stream_url) return track.stream_url;
-  if (track.file_url) return track.file_url;
+  if (track.stream_url) return track.stream_url; 
+  if (track.is_external && track.file_url) return track.file_url; 
   return `/api/tracks/${track.id}/stream`;
 }
 
@@ -60,6 +62,20 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   } catch (err) {
     clearTimeout(id);
     throw err;
+  }
+}
+
+// Функция выполнения поиска (вынесена отдельно, чтобы использовать в разных местах)
+async function performSearch(query) {
+  if (!query || query.length < 2) return;
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
+  try {
+    const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    renderTracks(data.tracks);
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска.</p>';
   }
 }
 
@@ -201,7 +217,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ПЛЕЕР (без async - чтобы play() вызывался мгновенно)
+// 6. ПЛЕЕР
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -234,7 +250,6 @@ function playTrack(track) {
     isPlaying = false;
   });
 
-  // Точная длительность в фоне
   if (track.permalink_url) {
     fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
       .then(r => r.json())
@@ -274,8 +289,12 @@ btnPrev.addEventListener('click', () => {
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
-  seekSlider.value = (audioPlayer.currentTime / duration) * 100;
+  
+  if (!isSeeking) {
+    seekSlider.value = (audioPlayer.currentTime / duration) * 100;
+  }
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+  
   if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
 
@@ -283,10 +302,20 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-seekSlider.addEventListener('change', () => {
+seekSlider.addEventListener('input', () => {
+  isSeeking = true;
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration) return;
-  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
+  const previewTime = (seekSlider.value / 100) * duration;
+  currentTimeEl.textContent = formatTime(previewTime);
+});
+
+seekSlider.addEventListener('change', () => {
+  isSeeking = false;
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  if (!duration) return;
+  const seekTime = (seekSlider.value / 100) * duration;
+  audioPlayer.currentTime = seekTime;
   savePlayerState();
 });
 
@@ -320,29 +349,33 @@ navHome.addEventListener('click', async () => {
   }
 });
 
+// ОБНОВЛЕНО: Вкладка "Поиск" запоминает прошлый запрос
 navSearch.addEventListener('click', () => {
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите название...</p>';
+  
+  // Если есть сохраненный запрос, сразу загружаем его результаты
+  if (lastSearchQuery) {
+    searchInput.value = lastSearchQuery;
+    performSearch(lastSearchQuery);
+  } else {
+    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите название...</p>';
+  }
 });
 
 let searchTimeout;
 searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const query = e.target.value.trim();
+  lastSearchQuery = query; // Сохраняем текущий запрос
+  
   if (query.length < 2) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
     return;
   }
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
-  searchTimeout = setTimeout(async () => {
-    try {
-      const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      renderTracks(data.tracks);
-    } catch (err) {
-      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска.</p>';
-    }
+  searchTimeout = setTimeout(() => {
+    performSearch(query);
   }, 600);
 });
 
