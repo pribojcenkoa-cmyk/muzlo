@@ -6,11 +6,9 @@ const trackListEl = document.getElementById('track-list');
 const pageTitle = document.getElementById('page-title');
 const searchContainer = document.getElementById('search-container');
 const searchInput = document.getElementById('search-input');
-
 const navHome = document.getElementById('nav-home');
 const navSearch = document.getElementById('nav-search');
 const navLibrary = document.getElementById('nav-library');
-
 const btnPlay = document.getElementById('btn-play');
 const btnNext = document.getElementById('btn-next');
 const btnPrev = document.getElementById('btn-prev');
@@ -21,7 +19,6 @@ const seekSlider = document.getElementById('seek-slider');
 const volumeSlider = document.getElementById('volume-slider');
 const currentTimeEl = document.getElementById('current-time');
 const totalTimeEl = document.getElementById('total-time');
-
 const authModal = document.getElementById('auth-modal');
 const authForm = document.getElementById('auth-form');
 const authContainer = document.getElementById('auth-container');
@@ -64,7 +61,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. РЕНДЕР ТРЕКОВ (С ЛАЙКАМИ И УДАЛЕНИЕМ)
+// 3. РЕНДЕР ТРЕКОВ
 // ==========================================
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
@@ -80,7 +77,6 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.className = 'track-item';
     div.dataset.index = index;
     
-    // Если мы в медиатеке — показываем крестик, иначе сердечко
     const actionBtnHTML = isLibrary 
       ? `<button class="btn-delete" title="Удалить из медиатеки">✕</button>` 
       : `<button class="btn-like" title="Сохранить в медиатеку">♥</button>`;
@@ -101,7 +97,6 @@ function renderTracks(tracksArray, isLibrary = false) {
       this.src = '/img/default-cover.png';
     };
 
-    // Клик по самому треку
     div.addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
       
@@ -114,17 +109,15 @@ function renderTracks(tracksArray, isLibrary = false) {
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
     
     if (isLibrary) {
-      // Логика удаления из медиатеки
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Удалить этот трек из медиатеки?')) return;
         try {
           const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
-          if (res.ok) navLibrary.click(); // Обновляем медиатеку
+          if (res.ok) navLibrary.click();
         } catch (err) { console.error('Ошибка удаления:', err); }
       });
     } else {
-      // Логика добавления (Лайк)
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         try {
@@ -166,12 +159,10 @@ function renderTracks(tracksArray, isLibrary = false) {
   });
 }
 
-// Делегирование клика по имени артиста
 trackListEl.addEventListener('click', (e) => {
   if (e.target.classList.contains('artist-link')) {
-    e.stopPropagation(); // Предотвращаем воспроизведение
-    const artistName = e.target.dataset.artist;
-    loadArtistPage(artistName);
+    e.stopPropagation();
+    loadArtistPage(e.target.dataset.artist);
   }
 });
 
@@ -180,12 +171,10 @@ trackListEl.addEventListener('click', (e) => {
 // ==========================================
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
-  
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
   pageTitle.textContent = `Артист: ${artistName}`;
   searchContainer.style.display = 'none';
-  
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка треков...</p>';
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   
   try {
     const res = await fetchWithTimeout(`/api/search/artist?name=${encodeURIComponent(artistName)}`);
@@ -194,14 +183,12 @@ async function loadArtistPage(artistName) {
     
     renderTracks(data.tracks);
     
-    // Добавляем кнопку "Назад" в самое начало списка
     const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">← Назад на главную</button>`;
     trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
-    
     document.getElementById('btn-back-home').addEventListener('click', () => navHome.click());
     
   } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки артиста.</p>';
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 }
 
@@ -209,7 +196,8 @@ async function loadArtistPage(artistName) {
 // 5. ПЛЕЕР
 // ==========================================
 async function playTrack(track) {
-  // Показываем плеер при первом клике
+  console.log('Запуск трека:', track.title);
+  
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
     playerEl.classList.remove('hidden');
@@ -229,7 +217,9 @@ async function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  audioPlayer.src = getStreamUrl(track);
+  const streamUrl = getStreamUrl(track);
+  console.log('Ссылка на аудио:', streamUrl);
+  audioPlayer.src = streamUrl;
   
   if (track.permalink_url) {
     try {
@@ -246,7 +236,7 @@ async function playTrack(track) {
     isPlaying = true;
     btnPlay.textContent = '⏸';
   }).catch(err => {
-    console.error('Ошибка аудио:', err);
+    console.error('Ошибка воспроизведения:', err);
     btnPlay.textContent = '▶';
     isPlaying = false;
   });
@@ -277,7 +267,6 @@ btnPrev.addEventListener('click', () => {
   document.querySelector(`.track-item[data-index="${prevIndex}"]`)?.click();
 });
 
-// Обновление ползунка во время игры
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
@@ -290,7 +279,7 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(duration);
 });
 
-// ИСПРАВЛЕНИЕ: Перемотка срабатывает, когда отпускаешь ползунок (change вместо input)
+// ИСПРАВЛЕНИЕ: Перемотка
 seekSlider.addEventListener('change', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
@@ -444,8 +433,5 @@ async function checkAuth() {
   } catch (err) { }
 }
 
-// ==========================================
-// 8. СТАРТ
-// ==========================================
 checkAuth();
 navHome.click();
