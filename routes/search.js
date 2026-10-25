@@ -227,7 +227,7 @@ router.get('/import-likes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
 });
 
-// 9. Импорт из Яндекс.Музыки
+// 9. Импорт из Яндекс.Музыки (Улучшенный парсер)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) {
@@ -238,38 +238,51 @@ router.get('/import-yandex', async (req, res) => {
     console.log('[Yandex] Загружаем страницу:', url);
 
     const response = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+      },
       timeout: 10000
     });
 
     const $ = cheerio.load(response.data);
     const tracks = [];
-    let parsedData = null;
+    let parsedTracks = [];
 
-    // Ищем данные плейлиста в JSON-скриптах
     const scripts = $('script[type="application/json"]').toArray();
+    console.log('[Yandex] Найдено JSON-скриптов:', scripts.length);
+
     for (const script of scripts) {
       try {
         const content = $(script).html();
-        if (content && content.includes('playlist')) {
-          const data = JSON.parse(content);
-          if (data && data.playlist) {
-            parsedData = data.playlist;
-            break;
+        if (!content || !content.includes('tracks')) continue;
+
+        const data = JSON.parse(content);
+        
+        const findTracks = (obj) => {
+          if (!obj || typeof obj !== 'object') return;
+          if (Array.isArray(obj) && obj.length > 0 && obj[0].title && obj[0].artists) {
+            parsedTracks = obj;
+            return;
           }
-        }
+          for (const key in obj) {
+            findTracks(obj[key]);
+            if (parsedTracks.length > 0) return;
+          }
+        };
+
+        findTracks(data);
+        if (parsedTracks.length > 0) break;
       } catch (e) {}
     }
 
-    if (parsedData && parsedData.tracks) {
-      console.log('[Yandex] Найдено треков в плейлисте:', parsedData.tracks.length);
+    if (parsedTracks.length > 0) {
+      console.log(`[Yandex] Найдено ${parsedTracks.length} треков в плейлисте. Ищем в SoundCloud...`);
 
-      // Ищем КАЖДЫЙ трек в SoundCloud, игнорируя ненайденные
-      for (const track of parsedData.tracks) {
-        if (!track.title || !track.artists) continue;
-        
+      for (const track of parsedTracks) {
+        if (!track.title) continue;
         const title = track.title;
-        const artist = track.artists.map(a => a.name).join(', ');
+        const artist = track.artists ? track.artists.map(a => a.name).join(', ') : 'Неизвестен';
         const searchQuery = `${artist} - ${title}`;
 
         try {
@@ -281,27 +294,24 @@ router.get('/import-yandex', async (req, res) => {
             ) || found[0];
 
             tracks.push(bestMatch);
-            console.log(`[Yandex] Найден: ${title}`);
+            console.log(`✅ Найден: ${title}`);
           } else {
-            console.log(`[Yandex] Не найден в SoundCloud: ${title}`);
+            console.log(`❌ Не найден в SC: ${title}`);
           }
-        } catch (e) {
-          console.log(`[Yandex] Ошибка поиска: ${title}`);
-        }
+        } catch (e) {}
       }
     } else {
-      console.log('[Yandex] JSON с плейлистом не найден на странице');
+      console.log('[Yandex] Данные о треках не найдены на странице. Возможно, Яндекс заблокировал запрос.');
     }
 
-    // Если нашли хотя бы что-то — отдаем результат
     if (tracks.length === 0) {
-      return res.status(404).json({ error: 'Не удалось найти ни одного трека в SoundCloud.' });
+      return res.status(404).json({ error: 'Не удалось найти треки. Возможно, Яндекс заблокировал запрос с сервера или плейлист пуст.' });
     }
 
     res.json({ tracks });
   } catch (err) {
     console.error('Ошибка импорта Яндекса:', err.message);
-    res.status(500).json({ error: 'Ошибка парсинга. Возможно, Яндекс заблокировал запрос.' });
+    res.status(500).json({ error: 'Ошибка соединения с Яндексом.' });
   }
 });
 
