@@ -107,7 +107,6 @@ router.get('/artist', async (req, res) => {
 // 5. Моя волна (Умная, на основе истории)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
-    // Берем топ-7 артистов из истории прослушиваний
     const topArtists = await query(
       `SELECT artist_name, COUNT(*) as play_count 
        FROM listening_history 
@@ -120,7 +119,6 @@ router.get('/my-wave', requireAuth, async (req, res) => {
 
     let baseArtists = topArtists.rows.map(r => r.artist_name);
 
-    // Если истории мало, добавляем артистов из медиатеки
     if (baseArtists.length < 5) {
       const liked = await query(
         'SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5',
@@ -129,12 +127,10 @@ router.get('/my-wave', requireAuth, async (req, res) => {
       baseArtists = [...new Set([...baseArtists, ...liked.rows.map(r => r.artist_name)])];
     }
 
-    // Если всё равно пусто, берем случайных популярных
     if (baseArtists.length === 0) {
       baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
     }
 
-    // Добавляем случайных популярных артистов для разнообразия
     const randomPopular = POPULAR_ARTISTS
       .sort(() => 0.5 - Math.random())
       .filter(a => !baseArtists.includes(a))
@@ -237,43 +233,77 @@ router.get('/import-likes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
 });
 
-// 9. Импорт из Яндекс.Музыки (через прокси для обхода блокировки)
+// 9. Импорт из Яндекс.Музыки (мульти-прокси + глубокий парсинг)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) {
     return res.status(400).json({ error: 'Ссылка должна быть с music.yandex.ru' });
   }
 
+  const PROXIES = [
+    'https://api.codetabs.com/v1/proxy?quest=',
+    'https://corsproxy.io/?',
+    'https://api.allorigins.win/raw?url=',
+    'https://thingproxy.freeboard.io/fetch/'
+  ];
+
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8'
+  };
+
+  let htmlContent = null;
+
+  for (const proxy of PROXIES) {
+    try {
+      console.log(`[Yandex] Пробуем прокси: ${proxy}`);
+      const targetUrl = proxy + encodeURIComponent(url);
+      const response = await axios.get(targetUrl, { headers, timeout: 12000 });
+      
+      if (response.data && response.data.length > 5000) {
+        console.log(`[Yandex] ✅ Прокси сработал, размер HTML: ${response.data.length}`);
+        htmlContent = response.data;
+        break;
+      } else {
+        console.log(`[Yandex] ❌ Пустой ответ от прокси`);
+      }
+    } catch (err) {
+      console.log(`[Yandex] ❌ Прокси не сработал: ${err.message}`);
+    }
+  }
+
+  if (!htmlContent) {
+    try {
+      console.log('[Yandex] Пробуем прямой запрос...');
+      const response = await axios.get(url, { headers, timeout: 10000 });
+      if (response.data && response.data.length > 5000) {
+        htmlContent = response.data;
+        console.log(`[Yandex] ✅ Прямой запрос сработал, размер: ${htmlContent.length}`);
+      }
+    } catch (err) {
+      console.log(`[Yandex] ❌ Прямой запрос не сработал: ${err.message}`);
+    }
+  }
+
+  if (!htmlContent) {
+    return res.status(500).json({ error: 'Все прокси и прямой запрос заблокированы Яндексом.' });
+  }
+
   try {
-    console.log('[Yandex] Загружаем страницу через прокси:', url);
-
-    // Используем прокси allorigins.win для обхода блокировки IP-адреса Render
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    
-    const response = await axios.get(proxyUrl, {
-      headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 15000
-    });
-
-    const $ = cheerio.load(response.data);
-    const tracks = [];
+    const $ = cheerio.load(htmlContent);
     let parsedTracks = [];
 
-    // Ищем JSON с данными плейлиста на странице
-    const scripts = $('script[type="application/json"]').toArray();
-    for (const script of scripts) {
+    // СПОСОБ 1: JSON в script[type="application/json"]
+    $('script[type="application/json"]').each((i, el) => {
+      if (parsedTracks.length > 0) return;
       try {
-        const content = $(script).html();
-        if (!content || !content.includes('tracks')) continue;
-
+        const content = $(el).html();
+        if (!content || !content.includes('title')) return;
         const data = JSON.parse(content);
-        
-        // Рекурсивно ищем массив с треками (у Яндекса сложная структура)
         const findTracks = (obj) => {
-          if (!obj || typeof obj !== 'object') return;
-          if (Array.isArray(obj) && obj.length > 0 && obj[0].title && obj[0].artists) {
+          if (!obj || typeof obj !== 'object' || parsedTracks.length > 0) return;
+          if (Array.isArray(obj) && obj.length > 0 && obj[0].title && (obj[0].artists || obj[0].artist)) {
             parsedTracks = obj;
             return;
           }
@@ -282,47 +312,89 @@ router.get('/import-yandex', async (req, res) => {
             if (parsedTracks.length > 0) return;
           }
         };
-
         findTracks(data);
-        if (parsedTracks.length > 0) break;
       } catch (e) {}
-    }
+    });
 
-    if (parsedTracks.length > 0) {
-      console.log(`[Yandex] Найдено ${parsedTracks.length} треков. Ищем в SoundCloud...`);
-
-      for (const track of parsedTracks) {
-        if (!track.title) continue;
-        const title = track.title;
-        const artist = track.artists ? track.artists.map(a => a.name).join(', ') : 'Неизвестен';
-        const searchQuery = `${artist} - ${title}`;
-
+    // СПОСОБ 2: Inline JSON (window.__INITIAL_STATE__)
+    if (parsedTracks.length === 0) {
+      $('script:not([src])').each((i, el) => {
+        if (parsedTracks.length > 0) return;
         try {
-          const found = await searchSoundCloud(searchQuery);
-          if (found.length > 0) {
-            const bestMatch = found.find(t => 
-              t.artist_name.toLowerCase().includes(artist.toLowerCase().split(',')[0]) ||
-              title.toLowerCase().includes(t.title.toLowerCase())
-            ) || found[0];
+          const content = $(el).html();
+          if (!content || content.length < 1000 || !content.includes('"title"')) return;
 
-            tracks.push(bestMatch);
+          const matches = content.match(/\{[\s\S]{500,}?\}/g);
+          if (!matches) return;
+
+          for (const m of matches) {
+            try {
+              const data = JSON.parse(m);
+              const findTracks = (obj) => {
+                if (!obj || typeof obj !== 'object' || parsedTracks.length > 0) return;
+                if (Array.isArray(obj) && obj.length > 0 && obj[0].title && (obj[0].artists || obj[0].artist)) {
+                  parsedTracks = obj;
+                  return;
+                }
+                for (const key in obj) {
+                  findTracks(obj[key]);
+                  if (parsedTracks.length > 0) return;
+                }
+              };
+              findTracks(data);
+            } catch (e) {}
           }
         } catch (e) {}
+      });
+    }
+
+    // СПОСОБ 3: Регулярные выражения (парсим сырой HTML)
+    if (parsedTracks.length === 0) {
+      const regex = /"title":"([^"]+)","artists":\[\{"name":"([^"]+)"/g;
+      let match;
+      while ((match = regex.exec(htmlContent)) !== null) {
+        parsedTracks.push({ title: match[1], artists: [{ name: match[2] }] });
+        if (parsedTracks.length > 100) break;
       }
     }
 
+    console.log(`[Yandex] Итого найдено в плейлисте: ${parsedTracks.length} треков`);
+
+    if (parsedTracks.length === 0) {
+      return res.status(404).json({ error: 'Не удалось распарсить плейлист. Возможно, ссылка приватная или имеет неверный формат.' });
+    }
+
+    const tracks = [];
+    for (const track of parsedTracks) {
+      if (!track.title) continue;
+      const title = track.title;
+      const artist = track.artists ? track.artists.map(a => a.name).join(', ') : (track.artist || 'Неизвестен');
+      const searchQuery = `${artist} - ${title}`;
+
+      try {
+        const found = await searchSoundCloud(searchQuery);
+        if (found.length > 0) {
+          const bestMatch = found.find(t => 
+            t.artist_name.toLowerCase().includes(artist.toLowerCase().split(',')[0]) ||
+            title.toLowerCase().includes(t.title.toLowerCase())
+          ) || found[0];
+          tracks.push(bestMatch);
+        }
+      } catch (e) {}
+    }
+
     if (tracks.length === 0) {
-      return res.status(404).json({ error: 'Не удалось найти треки. Прокси не помог, или плейлист пуст.' });
+      return res.status(404).json({ error: `Найдено ${parsedTracks.length} треков в плейлисте, но ни один не найден в SoundCloud.` });
     }
 
     res.json({ tracks });
   } catch (err) {
-    console.error('Ошибка импорта Яндекса:', err.message);
-    res.status(500).json({ error: 'Ошибка соединения с прокси.' });
+    console.error('Ошибка парсинга Яндекса:', err.message);
+    res.status(500).json({ error: 'Ошибка парсинга HTML.' });
   }
 });
 
-// 10. Прокси для картинок (чтобы не блокировались на мобильных)
+// 10. Прокси для картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
