@@ -29,6 +29,7 @@ const authForm = document.getElementById('auth-form');
 const authContainer = document.getElementById('auth-container');
 
 // Элементы импорта
+const importBtn = document.getElementById('import-btn');
 const importModal = document.getElementById('import-modal');
 const btnCloseImport = document.getElementById('btn-close-import');
 const importUrlInput = document.getElementById('import-url');
@@ -484,28 +485,16 @@ async function checkAuth() {
 }
 
 // ==========================================
-// 9. ИМПОРТ ЛАЙКОВ SOUNDCLOUD (НОВОЕ ОКНО)
+// 9. ИМПОРТ ЛАЙКОВ SOUNDCLOUD
 // ==========================================
+if (importBtn) {
+  importBtn.addEventListener('click', () => {
+    importModal.classList.add('active');
+    importStatus.textContent = ''; 
+    importUrlInput.value = ''; 
+  });
+}
 
-// Создаем кнопку импорта
-const importBtn = document.createElement('button');
-importBtn.className = 'btn-auth';
-importBtn.style.marginTop = '10px';
-importBtn.style.backgroundColor = '#ff5500';
-importBtn.style.color = '#fff';
-importBtn.style.border = 'none';
-importBtn.textContent = 'Загрузить мои лайки';
-importBtn.addEventListener('click', () => {
-  importModal.classList.add('active');
-  importStatus.textContent = ''; 
-  importUrlInput.value = ''; 
-});
-
-// Добавляем кнопку в сайдбар
-const authCont = document.getElementById('auth-container');
-authCont.parentNode.insertBefore(importBtn, authCont.nextSibling);
-
-// Обработчики модального окна
 btnCloseImport.addEventListener('click', () => importModal.classList.remove('active'));
 importModal.addEventListener('click', (e) => {
   if (e.target === importModal) importModal.classList.remove('active');
