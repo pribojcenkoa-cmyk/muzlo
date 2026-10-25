@@ -235,6 +235,8 @@ router.get('/import-yandex', async (req, res) => {
   }
 
   try {
+    console.log('[Yandex] Загружаем страницу:', url);
+
     const response = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
       timeout: 10000
@@ -242,10 +244,10 @@ router.get('/import-yandex', async (req, res) => {
 
     const $ = cheerio.load(response.data);
     const tracks = [];
-
-    const scripts = $('script[type="application/json"]').toArray();
     let parsedData = null;
 
+    // Ищем данные плейлиста в JSON-скриптах
+    const scripts = $('script[type="application/json"]').toArray();
     for (const script of scripts) {
       try {
         const content = $(script).html();
@@ -260,6 +262,9 @@ router.get('/import-yandex', async (req, res) => {
     }
 
     if (parsedData && parsedData.tracks) {
+      console.log('[Yandex] Найдено треков в плейлисте:', parsedData.tracks.length);
+
+      // Ищем КАЖДЫЙ трек в SoundCloud, игнорируя ненайденные
       for (const track of parsedData.tracks) {
         if (!track.title || !track.artists) continue;
         
@@ -276,13 +281,21 @@ router.get('/import-yandex', async (req, res) => {
             ) || found[0];
 
             tracks.push(bestMatch);
+            console.log(`[Yandex] Найден: ${title}`);
+          } else {
+            console.log(`[Yandex] Не найден в SoundCloud: ${title}`);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.log(`[Yandex] Ошибка поиска: ${title}`);
+        }
       }
+    } else {
+      console.log('[Yandex] JSON с плейлистом не найден на странице');
     }
 
+    // Если нашли хотя бы что-то — отдаем результат
     if (tracks.length === 0) {
-      return res.status(404).json({ error: 'Не удалось найти треки в плейлисте или они не найдены в SoundCloud' });
+      return res.status(404).json({ error: 'Не удалось найти ни одного трека в SoundCloud.' });
     }
 
     res.json({ tracks });
