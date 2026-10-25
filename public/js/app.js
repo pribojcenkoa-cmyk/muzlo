@@ -8,6 +8,8 @@ const navHome = document.getElementById('nav-home');
 const navSearch = document.getElementById('nav-search');
 const navLibrary = document.getElementById('nav-library');
 const navWave = document.getElementById('nav-wave');
+const navProfile = document.getElementById('nav-profile');
+const profileStats = document.getElementById('profile-stats');
 const btnPlay = document.getElementById('btn-play');
 const btnNext = document.getElementById('btn-next');
 const btnPrev = document.getElementById('btn-prev');
@@ -222,9 +224,10 @@ trackListEl.addEventListener('click', (e) => {
 // 5. АРТИСТ
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
-  [navHome, navSearch, navLibrary, navWave].forEach(el => el.classList.remove('active'));
+  [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
   pageTitle.textContent = `Артист: ${artistName}`;
   searchContainer.style.display = 'none';
+  profileStats.style.display = 'none';
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   
   try {
@@ -239,7 +242,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
+// 6. ВОСПРОИЗВЕДЕНИЕ (С записью в историю)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -266,6 +269,19 @@ function playTrack(track) {
     isPlaying = true;
     btnPlay.textContent = '⏸';
     savePlayerState();
+    
+    // ЗАПИСЬ В ИСТОРИЮ
+    fetch('/api/search/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        track_id: track.id,
+        title: track.title,
+        artist_name: track.artist_name,
+        duration: track.duration
+      })
+    }).catch(err => console.log('Не авторизован'));
+
   }).catch(err => {
     console.error('Ошибка аудио:', err);
     btnPlay.textContent = '▶';
@@ -347,10 +363,11 @@ window.addEventListener('beforeunload', savePlayerState);
 
 // 7. НАВИГАЦИЯ
 function switchTab(activeTab, title, showSearch = false) {
-  [navHome, navSearch, navLibrary, navWave].forEach(el => el.classList.remove('active'));
+  [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
   pageTitle.textContent = title;
   searchContainer.style.display = showSearch ? 'block' : 'none';
+  profileStats.style.display = 'none'; // Скрываем статистику при переходе
 }
 
 navHome.addEventListener('click', async () => {
@@ -384,6 +401,42 @@ navWave.addEventListener('click', async () => {
     renderTracks(data.tracks);
   } catch (err) {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки волны.</p>';
+  }
+});
+
+navProfile.addEventListener('click', async () => {
+  switchTab(navProfile, 'Мой профиль');
+  trackListEl.innerHTML = '';
+  profileStats.style.display = 'block';
+  profileStats.innerHTML = '<p style="text-align:center;">Загрузка статистики...</p>';
+
+  try {
+    const res = await fetch('/api/search/stats');
+    if (res.status === 401) {
+      profileStats.innerHTML = '<p style="color:red; text-align:center;">Войдите в аккаунт, чтобы увидеть статистику.</p>';
+      return;
+    }
+    const data = await res.json();
+    
+    const hours = Math.floor(data.total_seconds / 3600);
+    const minutes = Math.floor((data.total_seconds % 3600) / 60);
+
+    profileStats.innerHTML = `
+      <h2 style="margin-bottom: 20px;">Статистика прослушиваний</h2>
+      <p style="font-size: 18px; margin-bottom: 20px;">Всего прослушано: <strong style="color:#1db954;">${hours} ч ${minutes} мин</strong></p>
+      
+      <h3 style="margin-bottom: 10px;">Топ артистов:</h3>
+      <ul style="list-style: none; padding: 0; margin-bottom: 20px;">
+        ${data.top_artists.map(a => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${a.artist_name} — <span style="color:#b3b3b3;">${a.count} раз</span></li>`).join('') || '<li>Нет данных</li>'}
+      </ul>
+
+      <h3 style="margin-bottom: 10px;">Топ треков:</h3>
+      <ul style="list-style: none; padding: 0;">
+        ${data.top_tracks.map(t => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${t.title} — <span style="color:#b3b3b3;">${t.artist_name} (${t.count} раз)</span></li>`).join('') || '<li>Нет данных</li>'}
+      </ul>
+    `;
+  } catch (err) {
+    profileStats.innerHTML = '<p style="color:red; text-align:center;">Ошибка загрузки статистики.</p>';
   }
 });
 
