@@ -28,7 +28,7 @@ body {
   height: 100vh;
   overflow: hidden;
   -webkit-text-size-adjust: 100%;
-  touch-action: pan-y; /* Разрешаем только вертикальный скролл */
+  touch-action: pan-y;
 }
 
 /* ==========================================
@@ -156,6 +156,27 @@ body {
 
 .sidebar nav li:hover { color: var(--text-main); }
 .sidebar nav li.active { background-color: var(--bg-hover); color: var(--text-main); }
+
+/* Кнопка ИМПОРТА SoundCloud */
+#import-btn {
+  width: calc(100% - 16px);
+  margin: 15px 8px 0 8px;
+  padding: 12px;
+  background-color: #ff5500;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.2s;
+  text-align: center;
+}
+
+#import-btn:hover {
+  background-color: #e64a00;
+  transform: scale(1.02);
+}
 
 /* ==========================================
    ОСНОВНОЙ КОНТЕНТ
@@ -330,7 +351,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
 .player-volume input { width: 100px; }
 
 /* ==========================================
-   МОДАЛЬНОЕ ОКНО
+   МОДАЛЬНЫЕ ОКНА
    ========================================== */
 .modal {
   display: none;
@@ -348,7 +369,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   padding: 40px;
   border-radius: 12px;
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   position: relative;
   text-align: center;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -385,6 +406,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   transition: transform 0.2s;
 }
 .btn-submit:hover { transform: scale(1.02); }
+.btn-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
 .toggle-auth { margin-top: 20px; font-size: 14px; color: var(--text-muted); }
 .toggle-auth a { color: var(--text-main); text-decoration: underline; }
@@ -393,7 +415,6 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
    МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px)
    ========================================== */
 @media (max-width: 768px) {
-  /* Строгая сетка: Шапка (auto) -> Контент (1fr) -> Плеер (65px) */
   body {
     display: grid;
     grid-template-columns: 1fr;
@@ -406,7 +427,6 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     overflow-x: hidden;
   }
 
-  /* Если плеер скрыт, он не занимает место */
   body:has(.player.hidden) {
     grid-template-rows: auto 1fr 0px;
   }
@@ -457,6 +477,16 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     color: var(--text-muted);
   }
   .sidebar nav li.active { background-color: var(--accent); color: #000; font-weight: bold; }
+
+  /* Кнопка импорта на мобилке */
+  #import-btn {
+    order: 4;
+    width: 100%;
+    margin: 10px 0 0 0;
+    padding: 8px;
+    font-size: 12px;
+    border-radius: 6px;
+  }
 
   /* --- КОНТЕНТ --- */
   .content {
