@@ -1,119 +1,94 @@
 import { Router } from 'express';
 import axios from 'axios';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
-const TRENDING_QUERIES = [
-  'top hits 2024', 'popular music', 'lofi hip hop', 'rock classics', 
-  'electronic dance', 'r&b hits', 'indie music', 'metal', 'jazz', 
-  'chillout', 'hip hop', '80s hits', '90s hits', 'acoustic', 'rap'
+const PIPED_APIS = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.private.coffee'
 ];
 
-async function searchSoundCloud(query, offset = 0) {
-  const searchResult = await scdl.search({
-    query: query,
-    resourceType: 'tracks',
-    limit: 50,
-    offset: offset
-  });
-
-  return searchResult.collection
-    .filter(track => track.duration < 900000)
-    .map(track => {
-      let cover = track.artwork_url || (track.user && track.user.avatar_url);
-      if (cover) cover = cover.replace('large', 't500x500');
-
-      return {
-        id: track.id,
-        title: track.title,
-        artist_name: track.user ? track.user.username : 'Неизвестен',
-        cover_url: cover,
-        duration: Math.round(track.duration / 1000),
-        permalink_url: track.permalink_url,
-        stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, 
-        is_external: false 
-      };
-    });
+async function fetchPiped(endpoint) {
+  for (const api of PIPED_APIS) {
+    try {
+      const res = await axios.get(`${api}${endpoint}`, { timeout: 6000 });
+      return res.data;
+    } catch (e) {
+      console.log(`[Piped] ${api} failed`);
+    }
+  }
+  throw new Error('All Piped APIs failed');
 }
 
+function mapTrack(item) {
+  let videoId = item.url ? item.url.split('v=')[1] : item.id;
+  return {
+    id: videoId,
+    title: item.title,
+    artist_name: item.uploaderName,
+    cover_url: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+    duration: item.duration, // Piped отдает длительность в секундах
+    stream_url: `/api/search/stream/${videoId}`, // Ссылка на наш прокси
+    is_external: false
+  };
+}
+
+// 1. Рекомендации
 router.get('/trending', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store'); 
   try {
-    const randomQuery = TRENDING_QUERIES[Math.floor(Math.random() * TRENDING_QUERIES.length)];
-    const randomOffset = Math.floor(Math.random() * 20) * 20; 
-    const tracks = await searchSoundCloud(randomQuery, randomOffset);
-    res.json({ tracks });
+    const data = await fetchPiped('/search?q=top+music+2024&filter=music_songs');
+    res.json({ tracks: data.items.map(mapTrack) });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
+// 2. Поиск
 router.get('/', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.json({ tracks: [] });
   try {
-    const tracks = await searchSoundCloud(query);
-    res.json({ tracks });
+    const data = await fetchPiped(`/search?q=${encodeURIComponent(query)}&filter=music_songs`);
+    res.json({ tracks: data.items.map(mapTrack) });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка поиска' });
   }
 });
 
-router.get('/info', async (req, res) => {
-  try {
-    const trackUrl = req.query.url;
-    if (!trackUrl) return res.status(400).json({ error: 'URL не передан' });
-    const info = await scdl.getInfo(trackUrl);
-    res.json({ duration: Math.round(info.duration / 1000) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// 3. Страница артиста
 router.get('/artist', async (req, res) => {
-  const artistName = req.query.name;
-  if (!artistName) return res.status(400).json({ error: 'Имя артиста не передано' });
+  const query = req.query.name;
+  if (!query) return res.json({ tracks: [] });
   try {
-    const tracks = await searchSoundCloud(artistName);
-    res.json({ tracks });
+    const data = await fetchPiped(`/search?q=${encodeURIComponent(query)}&filter=music_songs`);
+    res.json({ tracks: data.items.map(mapTrack) });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// СТРИМИНГ (ПЕРЕАДРЕСАЦИЯ)
-router.get('/stream', async (req, res) => {
+// 4. Стриминг (Проксирование через Piped)
+router.get('/stream/:id', async (req, res) => {
   try {
-    const trackUrl = req.query.url;
-    if (!trackUrl) return res.status(400).send('Ссылка не передана');
-
-    const info = await scdl.getInfo(trackUrl);
-    let streamUrl = null;
-
-    // Ищем прямую ссылку
-    if (info.formats) {
-      const prog = info.formats.find(f => f.format.protocol === 'progressive');
-      if (prog) streamUrl = prog.url;
+    const videoId = req.params.id;
+    const data = await fetchPiped(`/streams/${videoId}`);
+    
+    if (!data.audioStreams || data.audioStreams.length === 0) {
+      throw new Error('Аудио не найдено');
     }
 
-    if (!streamUrl && info.media && info.media.transcodings) {
-      const trans = info.media.transcodings.find(t => t.format.protocol === 'progressive');
-      if (trans) {
-        const tRes = await axios.get(trans.url, { params: { client_id: scdl.client_id } });
-        streamUrl = tRes.data.url;
-      }
+    // Сортируем по качеству и берем лучшую дорожку
+    const bestAudio = data.audioStreams.sort((a, b) => b.bitrate - a.bitrate)[0];
+    
+    // proxyUrl — это специальная ссылка от Piped, которая обходит блокировки
+    // и поддерживает перемотку (Range requests)
+    if (bestAudio.proxyUrl) {
+      return res.redirect(bestAudio.proxyUrl);
     }
-
-    if (streamUrl) {
-      // Перенаправляем браузер прямо на CDN SoundCloud
-      res.redirect(streamUrl);
-    } else {
-      res.status(404).send('Прямая ссылка не найдена');
-    }
+    
+    // Запасной вариант
+    res.redirect(bestAudio.url);
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);
     res.status(500).send('Ошибка стриминга');
