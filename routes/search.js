@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import axios from 'axios';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -6,10 +7,12 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
+// Актуальные запросы для рекомендаций (2026 год)
 const TRENDING_QUERIES = [
-  'top hits 2024', 'popular music', 'lofi hip hop', 'rock classics', 
-  'electronic dance', 'r&b hits', 'indie music', 'metal', 'jazz', 
-  'chillout', 'hip hop', '80s hits', '90s hits', 'acoustic', 'rap'
+  'top hits 2026', 'popular music 2026', 'trending songs 2026', 
+  'new music 2026', 'billboard hot 100 2026', 'spotify top 50 2026',
+  'best songs 2026', 'viral hits 2026', 'top r&b 2026', 'top rap 2026',
+  'top rock 2026', 'electronic 2026', 'lofi hip hop 2026', 'indie 2026'
 ];
 
 async function searchSoundCloud(query, offset = 0) {
@@ -21,7 +24,8 @@ async function searchSoundCloud(query, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000) // Отсеиваем сборники
+    // Отсеиваем длинные сборники (больше 15 минут)
+    .filter(track => track.duration < 900000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
@@ -39,7 +43,7 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
-// 1. Рекомендации (Случайные)
+// 1. РЕКОМЕНДАЦИИ (Случайные при каждом запросе)
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
@@ -53,7 +57,7 @@ router.get('/trending', async (req, res) => {
   }
 });
 
-// 2. Поиск
+// 2. ПОИСК
 router.get('/', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.json({ tracks: [] });
@@ -61,11 +65,12 @@ router.get('/', async (req, res) => {
     const tracks = await searchSoundCloud(query);
     res.json({ tracks });
   } catch (err) {
+    console.error('Ошибка поиска:', err.message);
     res.status(500).json({ error: 'Ошибка поиска' });
   }
 });
 
-// 3. Получение точной длительности (чтобы ползунок не застревал)
+// 3. ПОЛУЧЕНИЕ ТОЧНОЙ ДЛИТЕЛЬНОСТИ (чтобы ползунок не застревал)
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -77,7 +82,7 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. Страница артиста
+// 4. ТРЕКИ АРТИСТА
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя артиста не передано' });
@@ -85,11 +90,12 @@ router.get('/artist', async (req, res) => {
     const tracks = await searchSoundCloud(artistName);
     res.json({ tracks });
   } catch (err) {
+    console.error('Ошибка загрузки артиста:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
 
-// 5. Стриминг (Скачивание потока напрямую)
+// 5. СТРИМИНГ (Скачивание потока напрямую)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;

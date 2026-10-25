@@ -64,7 +64,62 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. РЕНДЕР ТРЕКОВ (С ЛАЙКАМИ И УДАЛЕНИЕМ)
+// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА
+// ==========================================
+function savePlayerState() {
+  if (!audioPlayer.src) return;
+  const track = currentTracks[currentTrackIndex];
+  if (!track) return;
+  
+  localStorage.setItem('muzlo_current_track', JSON.stringify(track));
+  localStorage.setItem('muzlo_current_time', audioPlayer.currentTime);
+}
+
+async function restorePlayerState() {
+  const savedTrackJson = localStorage.getItem('muzlo_current_track');
+  const savedTime = parseFloat(localStorage.getItem('muzlo_current_time') || 0);
+  
+  if (!savedTrackJson) return;
+
+  try {
+    const track = JSON.parse(savedTrackJson);
+    
+    // Показываем плеер
+    const playerEl = document.querySelector('.player');
+    if (playerEl) playerEl.classList.remove('hidden');
+
+    playerTitle.textContent = track.title;
+    playerArtist.textContent = track.artist_name || 'Неизвестен';
+    
+    if (track.cover_url) {
+      playerCover.src = track.cover_url;
+      playerCover.classList.remove('hidden');
+    } else {
+      playerCover.classList.add('hidden');
+    }
+
+    currentTrackRealDuration = track.duration || 0;
+    totalTimeEl.textContent = formatTime(currentTrackRealDuration);
+    
+    // Устанавливаем трек, но НЕ включаем его (браузер заблокирует автоплей)
+    audioPlayer.src = getStreamUrl(track);
+    isPlaying = false;
+    btnPlay.textContent = '▶';
+
+    // Как только метаданные загрузятся, ставим сохраненное время
+    audioPlayer.addEventListener('loadedmetadata', () => {
+      if (savedTime > 0 && savedTime < audioPlayer.duration) {
+        audioPlayer.currentTime = savedTime;
+      }
+    }, { once: true });
+
+  } catch (e) {
+    console.error('Ошибка восстановления плеера', e);
+  }
+}
+
+// ==========================================
+// 4. РЕНДЕР ТРЕКОВ
 // ==========================================
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
@@ -100,7 +155,6 @@ function renderTracks(tracksArray, isLibrary = false) {
       this.src = '/img/default-cover.png';
     };
 
-    // Клик по треку
     div.addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
       
@@ -113,7 +167,6 @@ function renderTracks(tracksArray, isLibrary = false) {
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
     
     if (isLibrary) {
-      // Логика удаления из медиатеки
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Удалить этот трек из медиатеки?')) return;
@@ -123,7 +176,6 @@ function renderTracks(tracksArray, isLibrary = false) {
         } catch (err) { console.error('Ошибка удаления:', err); }
       });
     } else {
-      // Логика добавления (Лайк)
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         try {
@@ -165,7 +217,6 @@ function renderTracks(tracksArray, isLibrary = false) {
   });
 }
 
-// Делегирование клика по имени артиста
 trackListEl.addEventListener('click', (e) => {
   if (e.target.classList.contains('artist-link')) {
     e.stopPropagation();
@@ -174,7 +225,7 @@ trackListEl.addEventListener('click', (e) => {
 });
 
 // ==========================================
-// 4. СТРАНИЦА АРТИСТА
+// 5. СТРАНИЦА АРТИСТА
 // ==========================================
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
@@ -202,10 +253,9 @@ async function loadArtistPage(artistName) {
 }
 
 // ==========================================
-// 5. ПЛЕЕР
+// 6. ПЛЕЕР
 // ==========================================
 async function playTrack(track) {
-  // Показываем плеер при первом клике
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
     playerEl.classList.remove('hidden');
@@ -221,17 +271,27 @@ async function playTrack(track) {
     playerCover.classList.add('hidden');
   }
 
-  // Берем точную длительность, которую вернул Piped API
   currentTrackRealDuration = track.duration || 0;
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  // Устанавливаем источник аудио
   audioPlayer.src = getStreamUrl(track);
+  
+  if (track.permalink_url) {
+    try {
+      const res = await fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`);
+      const data = await res.json();
+      if (data.duration) {
+        currentTrackRealDuration = data.duration;
+        totalTimeEl.textContent = formatTime(data.duration);
+      }
+    } catch (e) { console.log('Точная длительность не получена'); }
+  }
   
   audioPlayer.play().then(() => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
+    savePlayerState(); // Сохраняем при запуске
   }).catch(err => {
     console.error('Ошибка аудио:', err);
     btnPlay.textContent = '▶';
@@ -245,6 +305,7 @@ btnPlay.addEventListener('click', () => {
     audioPlayer.pause();
     btnPlay.textContent = '▶';
     isPlaying = false;
+    savePlayerState(); // Сохраняем время при паузе
   } else {
     audioPlayer.play();
     btnPlay.textContent = '⏸';
@@ -264,12 +325,16 @@ btnPrev.addEventListener('click', () => {
   document.querySelector(`.track-item[data-index="${prevIndex}"]`)?.click();
 });
 
-// Обновление ползунка во время игры
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
   seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+  
+  // Сохраняем прогресс каждые 3 секунды (чтобы не спамить localStorage)
+  if (Math.floor(audioPlayer.currentTime) % 3 === 0) {
+    savePlayerState();
+  }
 });
 
 audioPlayer.addEventListener('loadedmetadata', () => {
@@ -277,22 +342,29 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(duration);
 });
 
-// ИСПРАВЛЕНИЕ: Перемотка срабатывает, когда отпускаешь ползунок (change вместо input)
 seekSlider.addEventListener('change', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
   const seekTime = (seekSlider.value / 100) * duration;
   audioPlayer.currentTime = seekTime;
+  savePlayerState();
 });
 
 volumeSlider.addEventListener('input', () => {
   audioPlayer.volume = volumeSlider.value;
 });
 
-audioPlayer.addEventListener('ended', () => btnNext.click());
+audioPlayer.addEventListener('ended', () => {
+  localStorage.removeItem('muzlo_current_track');
+  localStorage.removeItem('muzlo_current_time');
+  btnNext.click();
+});
+
+// Сохраняем при закрытии/обновлении страницы
+window.addEventListener('beforeunload', savePlayerState);
 
 // ==========================================
-// 6. НАВИГАЦИЯ
+// 7. НАВИГАЦИЯ
 // ==========================================
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
@@ -361,7 +433,7 @@ navLibrary.addEventListener('click', async () => {
 });
 
 // ==========================================
-// 7. АВТОРИЗАЦИЯ
+// 8. АВТОРИЗАЦИЯ
 // ==========================================
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
@@ -432,7 +504,8 @@ async function checkAuth() {
 }
 
 // ==========================================
-// 8. СТАРТ
+// 9. СТАРТ
 // ==========================================
 checkAuth();
-navHome.click();
+restorePlayerState(); 
+navHome.click(); 
