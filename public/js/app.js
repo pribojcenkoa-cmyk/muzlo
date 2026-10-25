@@ -80,6 +80,7 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.className = 'track-item';
     div.dataset.index = index;
     
+    // Если мы в медиатеке — показываем крестик, иначе сердечко
     const actionBtnHTML = isLibrary 
       ? `<button class="btn-delete" title="Удалить из медиатеки">✕</button>` 
       : `<button class="btn-like" title="Сохранить в медиатеку">♥</button>`;
@@ -102,7 +103,6 @@ function renderTracks(tracksArray, isLibrary = false) {
 
     // Клик по самому треку
     div.addEventListener('click', (e) => {
-      // Игнорируем клики по кнопкам и ссылкам, чтобы не запускать трек
       if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
       
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
@@ -192,14 +192,12 @@ async function loadArtistPage(artistName) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     
-    // Отрисовываем треки
     renderTracks(data.tracks);
     
     // Добавляем кнопку "Назад" в самое начало списка
     const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">← Назад на главную</button>`;
     trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
     
-    // Вешаем событие на кнопку "Назад"
     document.getElementById('btn-back-home').addEventListener('click', () => navHome.click());
     
   } catch (err) {
@@ -211,7 +209,7 @@ async function loadArtistPage(artistName) {
 // 5. ПЛЕЕР
 // ==========================================
 async function playTrack(track) {
-  // Показываем плеер, если он скрыт (появится только при первом клике)
+  // Показываем плеер при первом клике
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
     playerEl.classList.remove('hidden');
@@ -233,7 +231,6 @@ async function playTrack(track) {
 
   audioPlayer.src = getStreamUrl(track);
   
-  // Запрашиваем точную длительность, чтобы ползунок не застревал
   if (track.permalink_url) {
     try {
       const res = await fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`);
@@ -280,6 +277,7 @@ btnPrev.addEventListener('click', () => {
   document.querySelector(`.track-item[data-index="${prevIndex}"]`)?.click();
 });
 
+// Обновление ползунка во время игры
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
@@ -292,10 +290,12 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(duration);
 });
 
-seekSlider.addEventListener('input', () => {
+// ИСПРАВЛЕНИЕ: Перемотка срабатывает, когда отпускаешь ползунок (change вместо input)
+seekSlider.addEventListener('change', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
-  if (!duration) return;
-  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
+  if (!duration || isNaN(duration)) return;
+  const seekTime = (seekSlider.value / 100) * duration;
+  audioPlayer.currentTime = seekTime;
 });
 
 volumeSlider.addEventListener('input', () => {
