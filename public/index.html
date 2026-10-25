@@ -9,6 +9,7 @@
 </head>
 <body>
 
+  <!-- Боковая панель (Левое меню) -->
   <aside class="sidebar">
     <div class="logo-wrapper">
       <div class="logo">Muzlo.</div>
@@ -36,6 +37,7 @@
     <button id="import-btn" class="btn-import">Импорт</button>
   </aside>
 
+  <!-- Основной контент -->
   <main class="content">
     <header class="content-header">
       <h1 id="page-title">Все треки</h1>
@@ -49,6 +51,7 @@
     <div class="track-list" id="track-list"></div>
   </main>
 
+  <!-- Нижний плеер (скрыт по умолчанию) -->
   <div class="player hidden">
     <div class="player-track-info">
       <img id="player-cover" src="" alt="Cover" class="player-cover hidden">
@@ -71,14 +74,17 @@
       </div>
     </div>
 
+    <!-- Блок громкости с усилением -->
     <div class="player-volume">
       <span>🔊</span>
-      <input type="range" id="volume-slider" value="1" min="0" max="1" step="0.01">
+      <input type="range" id="volume-slider" value="50" min="0" max="300" step="1">
+      <span id="volume-label" style="font-size: 12px; width: 40px; text-align: right;">100%</span>
     </div>
   </div>
 
   <audio id="audio-player"></audio>
 
+  <!-- Модальное окно авторизации -->
   <div class="modal" id="auth-modal">
     <div class="modal-content">
       <span class="close-btn" id="btn-close-auth">&times;</span>
@@ -95,6 +101,7 @@
     </div>
   </div>
 
+  <!-- Модальное окно импорта -->
   <div class="modal" id="import-modal">
     <div class="modal-content">
       <span class="close-btn" id="btn-close-import">&times;</span>

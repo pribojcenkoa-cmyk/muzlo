@@ -18,6 +18,7 @@ const playerArtist = document.getElementById('player-artist');
 const playerCover = document.getElementById('player-cover');
 const seekSlider = document.getElementById('seek-slider');
 const volumeSlider = document.getElementById('volume-slider');
+const volumeLabel = document.getElementById('volume-label');
 const currentTimeEl = document.getElementById('current-time');
 const totalTimeEl = document.getElementById('total-time');
 const authModal = document.getElementById('auth-modal');
@@ -40,6 +41,11 @@ let isSeeking = false;
 let lastSearchQuery = ''; 
 let userLikedTrackIds = new Set(); 
 
+// Web Audio API для усиления звука
+let audioContext = null;
+let sourceNode = null;
+let gainNode = null;
+
 // 2. УТИЛИТЫ
 const formatTime = (seconds) => {
   if (!seconds || isNaN(seconds)) return '0:00';
@@ -54,6 +60,20 @@ function getStreamUrl(track) {
   if (track.stream_url) return track.stream_url; 
   if (track.is_external && track.file_url) return track.file_url; 
   return `/api/tracks/${track.id}/stream`;
+}
+
+// Инициализация Web Audio API
+function initAudioContext() {
+  if (audioContext) return;
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    sourceNode = audioContext.createMediaElementSource(audioPlayer);
+    gainNode = audioContext.createGain();
+    sourceNode.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+  } catch (e) {
+    console.error('Web Audio API не поддерживается:', e);
+  }
 }
 
 async function fetchWithTimeout(url, options = {}, timeout = 10000) {
@@ -92,18 +112,26 @@ async function performSearch(query) {
   }
 }
 
-// 3. СОХРАНЕНИЕ И ВОССТАНОВЛЕНИЕ ПЛЕЕРА
+// 3. СОХРАНЕНИЕ ПЛЕЕРА
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
   if (!track) return;
   localStorage.setItem('muzlo_current_track', JSON.stringify(track));
   localStorage.setItem('muzlo_current_time', audioPlayer.currentTime);
+  localStorage.setItem('muzlo_volume', volumeSlider.value);
 }
 
 async function restorePlayerState() {
   const savedTrackJson = localStorage.getItem('muzlo_current_track');
   const savedTime = parseFloat(localStorage.getItem('muzlo_current_time') || 0);
+  const savedVolume = localStorage.getItem('muzlo_volume');
+
+  if (savedVolume) {
+    volumeSlider.value = savedVolume;
+    updateVolume();
+  }
+
   if (!savedTrackJson) return;
 
   try {
@@ -254,6 +282,12 @@ function playTrack(track) {
     playerEl.classList.remove('hidden');
   }
 
+  // Инициализируем Web Audio при первом клике (браузер требует жест пользователя)
+  initAudioContext();
+  if (audioContext && audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+
   playerTitle.textContent = track.title;
   playerArtist.textContent = track.artist_name || 'Неизвестен';
   
@@ -355,7 +389,23 @@ seekSlider.addEventListener('change', () => {
   savePlayerState();
 });
 
-volumeSlider.addEventListener('input', () => audioPlayer.volume = volumeSlider.value);
+// УПРАВЛЕНИЕ ГРОМКОСТЬЮ (с усилением до 300%)
+function updateVolume() {
+  const value = parseInt(volumeSlider.value);
+  volumeLabel.textContent = value + '%';
+
+  if (value <= 100) {
+    // Обычная громкость
+    if (gainNode) gainNode.gain.value = 1;
+    audioPlayer.volume = value / 100;
+  } else {
+    // Усиление выше 100%
+    audioPlayer.volume = 1;
+    if (gainNode) gainNode.gain.value = value / 100; // 1.0 - 3.0
+  }
+}
+
+volumeSlider.addEventListener('input', updateVolume);
 
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
@@ -545,7 +595,7 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// 9. ИМПОРТ (С ОЧИСТКОЙ ССЫЛКИ)
+// 9. ИМПОРТ
 if (importBtn) {
   importBtn.addEventListener('click', () => {
     importModal.classList.add('active');
@@ -566,7 +616,6 @@ btnDoImport.addEventListener('click', async () => {
     return;
   }
 
-  // Очищаем ссылку от лишних параметров (utm_source и т.д.)
   if (url.includes('?')) {
     url = url.split('?')[0];
   }
@@ -612,6 +661,7 @@ btnDoImport.addEventListener('click', async () => {
 });
 
 // 10. СТАРТ
-checkAuth();
+initAudioContext(); // Инициализируем аудиоконтекст
 restorePlayerState(); 
+checkAuth();
 navHome.click();
