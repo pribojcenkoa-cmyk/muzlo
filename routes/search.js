@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import axios from 'axios';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -6,13 +7,10 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
-// Популярные российские и зарубежные артисты (у которых точно есть треки в SoundCloud)
 const POPULAR_ARTISTS = [
-  // Российские
   'Onda Andar', 'Sematary', 'Kizaru', 'Miyagi', 'Andy Panda', 'Scriptonite', 
   'Boulevard Depo', 'Pharaoh', 'FACE', 'LSP', 'Markul', 'T-Fest', 
   'Big Baby Tape', 'Kino', 'Morgenshtern', 'GONE.Fludd', 'Gidayyat',
-  // Зарубежные
   'Lil Peep', 'Kendrick Lamar', 'Drake', 'Travis Scott', 'Future', 
   'Kanye West', 'Eminem', 'Playboi Carti', '21 Savage', 'Metro Boomin',
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
@@ -24,16 +22,19 @@ async function searchSoundCloud(query, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000) // До 15 минут
+    .filter(track => track.duration < 900000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
+
+      // ПРОКСИРУЕМ КАРТИНКИ ЧЕРЕЗ НАШ СЕРВЕР
+      const proxyCover = cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null;
 
       return {
         id: track.id,
         title: track.title,
         artist_name: track.user ? track.user.username : 'Неизвестен',
-        cover_url: cover,
+        cover_url: proxyCover,
         duration: Math.round(track.duration / 1000),
         permalink_url: track.permalink_url,
         stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`,
@@ -42,23 +43,20 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
-// 1. РЕКОМЕНДАЦИИ (Популярные российские и зарубежные артисты)
+// 1. Рекомендации
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
-    // Выбираем случайного артиста из списка
     const randomArtist = POPULAR_ARTISTS[Math.floor(Math.random() * POPULAR_ARTISTS.length)];
     const randomOffset = Math.floor(Math.random() * 4) * 10;
     
     const tracks = await searchSoundCloud(randomArtist, randomOffset);
     
-    // Берем только треки этого артиста, чтобы не было сборников
     const artistTracks = tracks.filter(t => 
       t.artist_name.toLowerCase().includes(randomArtist.toLowerCase()) || 
       randomArtist.toLowerCase().includes(t.artist_name.toLowerCase())
     );
     
-    // Если по фильтру ничего не осталось, возвращаем как есть
     res.json({ tracks: artistTracks.length > 0 ? artistTracks : tracks });
   } catch (err) {
     console.error('Ошибка рекомендаций:', err.message);
@@ -111,7 +109,26 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Стриминг
+// 5. ПРОКСИ ДЛЯ КАРТИНОК (чтобы не блокировались на мобильных)
+router.get('/cover', async (req, res) => {
+  try {
+    const imageUrl = req.query.url;
+    if (!imageUrl) return res.status(400).send('Нет URL');
+    
+    const response = await axios.get(imageUrl, { 
+      responseType: 'stream',
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Кэш на сутки
+    response.data.pipe(res);
+  } catch (err) {
+    res.redirect('/img/default-cover.png');
+  }
+});
+
+// 6. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
