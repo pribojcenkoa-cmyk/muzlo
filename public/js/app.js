@@ -1,5 +1,5 @@
 // ==========================================
-// 1. ИНИЦИАЛИЗАЦИЯ И ПОЛУЧЕНИЕ ЭЛЕМЕНТОВ
+// 1. ИНИЦИАЛИЗАЦИЯ
 // ==========================================
 const audioPlayer = document.getElementById('audio-player');
 const trackListEl = document.getElementById('track-list');
@@ -7,12 +7,10 @@ const pageTitle = document.getElementById('page-title');
 const searchContainer = document.getElementById('search-container');
 const searchInput = document.getElementById('search-input');
 
-// Навигация
 const navHome = document.getElementById('nav-home');
 const navSearch = document.getElementById('nav-search');
 const navLibrary = document.getElementById('nav-library');
 
-// Элементы плеера
 const btnPlay = document.getElementById('btn-play');
 const btnNext = document.getElementById('btn-next');
 const btnPrev = document.getElementById('btn-prev');
@@ -24,20 +22,18 @@ const volumeSlider = document.getElementById('volume-slider');
 const currentTimeEl = document.getElementById('current-time');
 const totalTimeEl = document.getElementById('total-time');
 
-// Авторизация
 const authModal = document.getElementById('auth-modal');
 const authForm = document.getElementById('auth-form');
 const authContainer = document.getElementById('auth-container');
 
-// Глобальное состояние
 let currentTracks = [];
 let currentTrackIndex = -1;
 let isPlaying = false;
 let isLoginMode = true;
-let currentTrackRealDuration = 0; // Храним настоящую длительность трека
+let currentTrackRealDuration = 0;
 
 // ==========================================
-// 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// 2. УТИЛИТЫ
 // ==========================================
 const formatTime = (seconds) => {
   if (!seconds || isNaN(seconds)) return '0:00';
@@ -48,18 +44,12 @@ const formatTime = (seconds) => {
 
 const getValidCover = (url) => url || '/img/default-cover.png';
 
-// Определяет, откуда брать аудио
 function getStreamUrl(track) {
-  // 1. Если есть готовая ссылка (SoundCloud или медиатека)
   if (track.stream_url) return track.stream_url; 
-  // 2. Если это внешний трек с прямой ссылкой
   if (track.is_external && track.file_url) return track.file_url; 
-  
-  // 3. Для локальных треков
   return `/api/tracks/${track.id}/stream`;
 }
 
-// Функция fetch с таймаутом
 async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
@@ -74,9 +64,9 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 }
 
 // ==========================================
-// 3. РЕНДЕР ТРЕКОВ
+// 3. РЕНДЕР ТРЕКОВ (С ЛАЙКАМИ И УДАЛЕНИЕМ)
 // ==========================================
-function renderTracks(tracksArray) {
+function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
   trackListEl.innerHTML = '';
   
@@ -90,6 +80,11 @@ function renderTracks(tracksArray) {
     div.className = 'track-item';
     div.dataset.index = index;
     
+    // Если мы в медиатеке — показываем крестик, иначе сердечко
+    const actionBtnHTML = isLibrary 
+      ? `<button class="btn-delete" title="Удалить из медиатеки">✕</button>` 
+      : `<button class="btn-like" title="Сохранить в медиатеку">♥</button>`;
+
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
       <div class="track-info">
@@ -97,69 +92,80 @@ function renderTracks(tracksArray) {
         <div class="track-artist">${track.artist_name || 'Неизвестен'}</div>
       </div>
       <div class="track-duration">${formatTime(track.duration)}</div>
-      <button class="btn-like" title="Сохранить в медиатеку">♥</button>
+      ${actionBtnHTML}
     `;
 
-    // Замена битой картинки на локальную
     const imgEl = div.querySelector('.track-cover');
     imgEl.onerror = function() {
       this.onerror = null; 
       this.src = '/img/default-cover.png';
     };
 
-    // Клик по треку
+    // Воспроизведение
     div.addEventListener('click', (e) => {
-      if (e.target.classList.contains('btn-like')) return; 
+      if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete')) return; 
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
       playTrack(track);
     });
 
-    // Клик по лайку
-    const likeBtn = div.querySelector('.btn-like');
-    likeBtn.addEventListener('click', async () => {
-      try {
-        const streamUrl = getStreamUrl(track);
-        
-        const res = await fetch('/api/library', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            track_id: String(track.id),
-            title: track.title,
-            artist_name: track.artist_name,
-            cover_url: track.cover_url,
-            duration: track.duration,
-            stream_url: streamUrl
-          })
-        });
+    const actionBtn = div.querySelector('.btn-like, .btn-delete');
+    
+    if (isLibrary) {
+      // Удаление из медиатеки
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Удалить этот трек из медиатеки?')) return;
+        try {
+          const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
+          if (res.ok) navLibrary.click();
+        } catch (err) { console.error('Ошибка удаления:', err); }
+      });
+    } else {
+      // Добавление в медиатеку (Лайк)
+      actionBtn.addEventListener('click', async () => {
+        try {
+          const streamUrl = getStreamUrl(track);
+          const res = await fetch('/api/library', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              track_id: String(track.id),
+              title: track.title,
+              artist_name: track.artist_name,
+              cover_url: track.cover_url,
+              duration: track.duration,
+              stream_url: streamUrl
+            })
+          });
 
-        if (res.status === 401) {
-          alert('Войдите в аккаунт, чтобы сохранять треки!');
-          authModal.classList.add('active');
-          return;
-        }
-        
-        if (!res.ok) {
-          const errData = await res.json();
-          alert(errData.error); 
-          return;
-        }
+          if (res.status === 401) {
+            alert('Войдите в аккаунт, чтобы сохранять треки!');
+            authModal.classList.add('active');
+            return;
+          }
+          
+          if (!res.ok) {
+            const errData = await res.json();
+            alert(errData.error); 
+            return;
+          }
 
-        if (res.ok) {
-          likeBtn.classList.add('liked');
-          likeBtn.textContent = '❤';
-        }
-      } catch (err) { console.error('Ошибка сохранения:', err); }
-    });
+          if (res.ok) {
+            actionBtn.classList.add('liked');
+            actionBtn.textContent = '❤';
+          }
+        } catch (err) { console.error('Ошибка сохранения:', err); }
+      });
+    }
 
     trackListEl.appendChild(div);
   });
 }
 
 // ==========================================
-// 4. УПРАВЛЕНИЕ ПЛЕЕРОМ (Асинхронная функция)
+// 4. УПРАВЛЕНИЕ ПЛЕЕРОМ
 // ==========================================
 async function playTrack(track) {
   playerTitle.textContent = track.title;
@@ -172,14 +178,12 @@ async function playTrack(track) {
     playerCover.classList.add('hidden');
   }
 
-  // Устанавливаем временную длительность из поиска
   currentTrackRealDuration = track.duration || 0;
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
   audioPlayer.src = getStreamUrl(track);
   
-  // Если у трека есть ссылка на SoundCloud, запрашиваем точную длительность
   if (track.permalink_url) {
     try {
       const res = await fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`);
@@ -188,7 +192,7 @@ async function playTrack(track) {
         currentTrackRealDuration = data.duration;
         totalTimeEl.textContent = formatTime(data.duration);
       }
-    } catch (e) { console.log('Не удалось получить точную длительность'); }
+    } catch (e) { console.log('Точная длительность не получена'); }
   }
   
   audioPlayer.play().then(() => {
@@ -226,22 +230,18 @@ btnPrev.addEventListener('click', () => {
   document.querySelector(`.track-item[data-index="${prevIndex}"]`)?.click();
 });
 
-// Обновление ползунка с использованием currentTrackRealDuration
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration || isNaN(duration)) return;
-  
   seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
 });
 
-// Применяем длительность, как только она загрузится
 audioPlayer.addEventListener('loadedmetadata', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   totalTimeEl.textContent = formatTime(duration);
 });
 
-// Перемотка
 seekSlider.addEventListener('input', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   if (!duration) return;
@@ -255,7 +255,7 @@ volumeSlider.addEventListener('input', () => {
 audioPlayer.addEventListener('ended', () => btnNext.click());
 
 // ==========================================
-// 5. ВКЛАДКИ И НАВИГАЦИЯ
+// 5. НАВИГАЦИЯ
 // ==========================================
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary].forEach(el => el.classList.remove('active'));
@@ -264,7 +264,6 @@ function switchTab(activeTab, title, showSearch = false) {
   searchContainer.style.display = showSearch ? 'block' : 'none';
 }
 
-// 1. Главная
 navHome.addEventListener('click', async () => {
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
@@ -278,7 +277,6 @@ navHome.addEventListener('click', async () => {
   }
 });
 
-// 2. Поиск
 navSearch.addEventListener('click', () => {
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
@@ -309,7 +307,6 @@ searchInput.addEventListener('input', (e) => {
   }, 600);
 });
 
-// 3. Медиатека
 navLibrary.addEventListener('click', async () => {
   switchTab(navLibrary, 'Моя медиатека');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
@@ -320,7 +317,7 @@ navLibrary.addEventListener('click', async () => {
       return;
     }
     const data = await res.json();
-    renderTracks(data.tracks);
+    renderTracks(data.tracks, true); // Передаем true, чтобы включить режим удаления
   } catch (err) {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
@@ -397,8 +394,5 @@ async function checkAuth() {
   } catch (err) { }
 }
 
-// ==========================================
-// 7. СТАРТ
-// ==========================================
 checkAuth();
 navHome.click();
