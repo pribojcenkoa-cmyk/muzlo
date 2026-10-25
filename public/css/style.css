@@ -27,6 +27,8 @@ body {
   grid-template-rows: 1fr 90px;
   height: 100vh;
   overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+  touch-action: pan-y; /* Разрешаем только вертикальный скролл */
 }
 
 /* ==========================================
@@ -164,6 +166,7 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   height: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
 .content-header {
@@ -387,10 +390,10 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
 .toggle-auth a { color: var(--text-main); text-decoration: underline; }
 
 /* ==========================================
-   МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px) - ИСПРАВЛЕНО
+   МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px)
    ========================================== */
 @media (max-width: 768px) {
-  /* СТРОГАЯ СЕТКА: Шапка (auto) -> Контент (1fr) -> Плеер (65px) */
+  /* Строгая сетка: Шапка (auto) -> Контент (1fr) -> Плеер (65px) */
   body {
     display: grid;
     grid-template-columns: 1fr;
@@ -399,6 +402,8 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     overflow: hidden;
     padding-bottom: 0;
     width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 
   /* Если плеер скрыт, он не занимает место */
@@ -459,6 +464,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     overflow-y: auto;
     overflow-x: hidden;
     width: 100%;
+    max-width: 100vw;
   }
 
   .content-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 15px; width: 100%; }
