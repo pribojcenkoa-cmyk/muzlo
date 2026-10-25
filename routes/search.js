@@ -6,10 +6,16 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
-const TRENDING_QUERIES = [
-  'Sematary', 'Onda Andar', 'Lil Peep', 'Kendrick Lamar', 'Drake', 
-  'Travis Scott', 'Future', 'Kanye West', 'Eminem', 'Phonk',
-  'rap hits 2026', 'hip hop', 'trap music', 'underground rap'
+// Популярные российские и зарубежные артисты (у которых точно есть треки в SoundCloud)
+const POPULAR_ARTISTS = [
+  // Российские
+  'Onda Andar', 'Sematary', 'Kizaru', 'Miyagi', 'Andy Panda', 'Scriptonite', 
+  'Boulevard Depo', 'Pharaoh', 'FACE', 'LSP', 'Markul', 'T-Fest', 
+  'Big Baby Tape', 'Kino', 'Morgenshtern', 'GONE.Fludd', 'Gidayyat',
+  // Зарубежные
+  'Lil Peep', 'Kendrick Lamar', 'Drake', 'Travis Scott', 'Future', 
+  'Kanye West', 'Eminem', 'Playboi Carti', '21 Savage', 'Metro Boomin',
+  'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
 async function searchSoundCloud(query, offset = 0) {
@@ -18,7 +24,7 @@ async function searchSoundCloud(query, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000)
+    .filter(track => track.duration < 900000) // До 15 минут
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
@@ -36,14 +42,24 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
-// 1. Рекомендации
+// 1. РЕКОМЕНДАЦИИ (Популярные российские и зарубежные артисты)
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
-    const randomQuery = TRENDING_QUERIES[Math.floor(Math.random() * TRENDING_QUERIES.length)];
-    const randomOffset = Math.floor(Math.random() * 4) * 10; 
-    const tracks = await searchSoundCloud(randomQuery, randomOffset);
-    res.json({ tracks });
+    // Выбираем случайного артиста из списка
+    const randomArtist = POPULAR_ARTISTS[Math.floor(Math.random() * POPULAR_ARTISTS.length)];
+    const randomOffset = Math.floor(Math.random() * 4) * 10;
+    
+    const tracks = await searchSoundCloud(randomArtist, randomOffset);
+    
+    // Берем только треки этого артиста, чтобы не было сборников
+    const artistTracks = tracks.filter(t => 
+      t.artist_name.toLowerCase().includes(randomArtist.toLowerCase()) || 
+      randomArtist.toLowerCase().includes(t.artist_name.toLowerCase())
+    );
+    
+    // Если по фильтру ничего не осталось, возвращаем как есть
+    res.json({ tracks: artistTracks.length > 0 ? artistTracks : tracks });
   } catch (err) {
     console.error('Ошибка рекомендаций:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
@@ -74,7 +90,7 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. СТРАНИЦА АРТИСТА (УМНАЯ ФИЛЬТРАЦИЯ)
+// 4. Страница артиста
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
@@ -82,12 +98,9 @@ router.get('/artist', async (req, res) => {
   try {
     const tracks = await searchSoundCloud(artistName);
     
-    // ФИЛЬТРАЦИЯ: Оставляем только треки, где имя исполнителя совпадает с искомым
-    // (чтобы убрать ремиксы от других людей, каверы и т.д.)
     const filteredTracks = tracks.filter(t => {
       const trackArtist = t.artist_name.toLowerCase();
       const searchName = artistName.toLowerCase();
-      // Проверяем, что трек содержит имя артиста в поле исполнителя
       return trackArtist.includes(searchName) || searchName.includes(trackArtist);
     });
 
