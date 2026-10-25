@@ -7,10 +7,13 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
+// ЗАПРОСЫ ДЛЯ ПОПУЛЯРНЫХ РЕПЕРОВ И ХИП-ХОПА
 const TRENDING_QUERIES = [
-  'top hits 2026', 'popular music 2026', 'trending songs 2026', 
-  'new music 2026', 'billboard hot 100 2026', 'spotify top 50 2026',
-  'best songs 2026', 'viral hits 2026', 'top r&b 2026', 'top rap 2026'
+  'Travis Scott', 'Drake', 'Kendrick Lamar', 'J. Cole', 
+  '21 Savage', 'Future', 'Playboi Carti', 'Metro Boomin', 
+  'Lil Baby', 'Pop Smoke', 'Eminem', 'Kanye West', 
+  'A$AP Rocky', 'Lil Uzi Vert', 'Don Toliver', 'Gunna', 
+  'rap hits', 'hip hop hits', 'trap music', 'drill music'
 ];
 
 async function searchSoundCloud(query, offset = 0) {
@@ -22,12 +25,12 @@ async function searchSoundCloud(query, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000)
+    // Отсеиваем длинные сборники и миксы (оставляем только треки до 10 минут)
+    .filter(track => track.duration < 600000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
 
-      // ПРОКСИРУЕМ КАРТИНКИ ЧЕРЕЗ НАШ СЕРВЕР
       const proxyCover = cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null;
 
       return {
@@ -43,15 +46,17 @@ async function searchSoundCloud(query, offset = 0) {
     });
 }
 
-// 1. Рекомендации
+// 1. Рекомендации (Случайный рэпер при каждом F5)
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
     const randomQuery = TRENDING_QUERIES[Math.floor(Math.random() * TRENDING_QUERIES.length)];
-    const randomOffset = Math.floor(Math.random() * 20) * 20; 
+    // Берем случайный отступ от 0 до 40, чтобы треки не повторялись
+    const randomOffset = Math.floor(Math.random() * 4) * 10; 
     const tracks = await searchSoundCloud(randomQuery, randomOffset);
     res.json({ tracks });
   } catch (err) {
+    console.error('Ошибка рекомендаций:', err.message);
     res.status(500).json({ error: 'Ошибка загрузки' });
   }
 });
@@ -92,15 +97,14 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. ПРОКСИ ДЛЯ КАРТИНОК (чтобы не блокировались на мобильных)
+// 5. Прокси для картинок
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
     if (!imageUrl) return res.status(400).send('Нет URL');
-    
     const response = await axios.get(imageUrl, { responseType: 'stream' });
     res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Кэш на сутки
+    res.setHeader('Cache-Control', 'public, max-age=86400');
     response.data.pipe(res);
   } catch (err) {
     res.redirect('/img/default-cover.png');
