@@ -44,7 +44,7 @@ let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let adminInterval = null;
 
-// Web Audio API для усиления
+// Web Audio API
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
@@ -106,16 +106,43 @@ async function loadAdminStats() {
     const res = await fetch('/api/admin/stats');
     if (!res.ok) return;
     const data = await res.json();
+    
     const onlineEl = document.getElementById('admin-online');
     const totalEl = document.getElementById('admin-total');
     const playsEl = document.getElementById('admin-plays');
     if (onlineEl) onlineEl.textContent = data.online;
     if (totalEl) totalEl.textContent = data.total_users;
     if (playsEl) playsEl.textContent = data.plays_today;
+
+    const usersContainer = document.getElementById('admin-users-list');
+    if (usersContainer && data.all_users) {
+      let html = '<table style="width:100%; text-align:left;">';
+      html += '<tr style="color:#1db954;"><th>ID</th><th>Email</th><th>Роль</th></tr>';
+      data.all_users.forEach(user => {
+        const roleColor = user.role === 'admin' ? '#ff4d4d' : '#b3b3b3';
+        html += `<tr>
+          <td style="padding: 3px 0;">${user.id}</td>
+          <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px;">${user.email}</td>
+          <td style="color: ${roleColor}; font-weight: bold;">${user.role}</td>
+        </tr>`;
+      });
+      html += '</table>';
+      usersContainer.innerHTML = html;
+    }
   } catch (err) {
     console.error('Ошибка загрузки админ-статистики:', err);
   }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btnShowUsers = document.getElementById('btn-show-users');
+  if (btnShowUsers) {
+    btnShowUsers.addEventListener('click', () => {
+      const list = document.getElementById('admin-users-list');
+      list.style.display = list.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+});
 
 async function performSearch(query) {
   if (!query || query.length < 2) return;
@@ -557,8 +584,53 @@ authContainer.addEventListener('click', (e) => {
 
 function updateAuthUI(user) {
   if (user) {
-    authContainer.innerHTML = `<div class="profile-info"><span>👤 ${user.email}</span><button class="btn-logout" id="btn-logout">Выйти</button></div>`;
+    authContainer.innerHTML = `
+      <div class="profile-info" style="display: flex; flex-direction: column; gap: 10px;">
+        <span>👤 ${user.email}</span>
+        <button class="btn-logout" id="btn-logout" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer;">Выйти</button>
+        <button id="btn-show-change-password" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Сменить пароль</button>
+        <div id="change-password-form" style="display: none; margin-top: 10px; padding: 10px; background: #282828; border-radius: 8px;">
+          <input type="password" id="old-password" placeholder="Старый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">
+          <input type="password" id="new-password-profile" placeholder="Новый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">
+          <button id="btn-save-new-password" style="width: 100%; padding: 5px; background: #1db954; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">Сохранить</button>
+        </div>
+      </div>
+    `;
     loadUserLikes();
+
+    // Обработчик для смены пароля в профиле
+    const btnShowChangePass = document.getElementById('btn-show-change-password');
+    const changePassForm = document.getElementById('change-password-form');
+    
+    btnShowChangePass.addEventListener('click', () => {
+      changePassForm.style.display = changePassForm.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-save-new-password').addEventListener('click', async () => {
+      const oldPassword = document.getElementById('old-password').value;
+      const newPassword = document.getElementById('new-password-profile').value;
+
+      if (!oldPassword || !newPassword) return alert('Заполните оба поля');
+
+      try {
+        const res = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPassword, newPassword })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('Пароль успешно изменен!');
+          changePassForm.style.display = 'none';
+          document.getElementById('old-password').value = '';
+          document.getElementById('new-password-profile').value = '';
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {
+        alert('Ошибка сети');
+      }
+    });
 
     // Виджет админа
     if (user.role === 'admin' && adminWidget) {
@@ -617,6 +689,85 @@ async function checkAuth() {
       updateAuthUI(data.user);
     }
   } catch (err) {}
+}
+
+// --- ЛОГИКА СБРОСА ПАРОЛЯ ---
+const btnForgot = document.getElementById('btn-forgot-password');
+const resetBlock = document.getElementById('reset-password-block');
+const btnBackToLogin = document.getElementById('btn-back-to-login');
+const btnSendCode = document.getElementById('btn-send-code');
+const resetStep2 = document.getElementById('reset-step-2');
+const btnConfirmReset = document.getElementById('btn-confirm-reset');
+
+if (btnForgot) {
+  btnForgot.addEventListener('click', (e) => {
+    e.preventDefault();
+    authForm.style.display = 'none';
+    resetBlock.style.display = 'block';
+  });
+
+  btnBackToLogin.addEventListener('click', (e) => {
+    e.preventDefault();
+    authForm.style.display = 'block';
+    resetBlock.style.display = 'none';
+    resetStep2.style.display = 'none';
+    btnSendCode.style.display = 'block';
+    btnSendCode.textContent = 'Получить код';
+  });
+
+  btnSendCode.addEventListener('click', async () => {
+    const email = document.getElementById('reset-email').value;
+    if (!email) return alert('Введите почту');
+    
+    btnSendCode.textContent = 'Отправка...';
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Код отправлен на почту! Проверьте папку Спам.');
+        resetStep2.style.display = 'block';
+        btnSendCode.style.display = 'none';
+      } else {
+        alert(data.error);
+        btnSendCode.textContent = 'Получить код';
+      }
+    } catch (e) {
+      alert('Ошибка сети');
+      btnSendCode.textContent = 'Получить код';
+    }
+  });
+
+  btnConfirmReset.addEventListener('click', async () => {
+    const email = document.getElementById('reset-email').value;
+    const code = document.getElementById('reset-code').value;
+    const newPassword = document.getElementById('reset-new-password').value;
+
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, newPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Пароль успешно изменен! Войдите с новым паролем.');
+        authForm.style.display = 'block';
+        resetBlock.style.display = 'none';
+        resetStep2.style.display = 'none';
+        btnSendCode.style.display = 'block';
+        btnSendCode.textContent = 'Получить код';
+        authForm.reset();
+      } else {
+        alert(data.error);
+      }
+    } catch (e) {
+      alert('Ошибка сети');
+    }
+  });
 }
 
 // 9. ИМПОРТ
