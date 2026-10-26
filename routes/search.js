@@ -19,22 +19,6 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// Получаем актуальный Client ID от SoundCloud
-async function getClientId() {
-  try {
-    const res = await axios.get('https://soundcloud.com/', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    });
-    const match = res.data.match(/client_id:"(.*?)"/);
-    if (match) return match[1];
-    const match2 = res.data.match(/client_id=([a-zA-Z0-9]+)/);
-    if (match2) return match2[1];
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
 // Вспомогательная функция поиска в SoundCloud
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
@@ -221,11 +205,12 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Истинные лайки через API v2)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Строгая очистка ссылки)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
+  // Очищаем ссылку от параметров и слэшей
   url = url.split('?')[0].replace(/\/$/, '');
   
   try {
@@ -240,56 +225,70 @@ router.get('/import-likes', async (req, res) => {
       }
     }
 
-    // Плейлист
+    // Убираем /likes на конце, если есть
+    url = url.replace('/likes', '');
+
+    let result;
+    
+    // Если плейлист (/sets/)
     if (url.includes('/sets/')) {
+      console.log('[SoundCloud] Загружаем плейлист:', url);
       const playlist = await scdl.getSetInfo(url);
-      const tracks = playlist.tracks.map(track => ({
-        id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
-        cover_url: track.artwork_url ? track.artwork_url.replace('large', 't500x500') : null,
-        duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
-        stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
-      }));
-      return res.json({ tracks });
+      result = { collection: playlist.tracks };
+    } 
+    // Если одиночный трек (есть username/trackname)
+    else {
+      const parts = url.replace('https://soundcloud.com/', '').split('/');
+      if (parts.length >= 2) {
+        console.log('[SoundCloud] Загружаем одиночный трек:', url);
+        const info = await scdl.getInfo(url);
+        result = { collection: [info] };
+      } else {
+        // Если это просто профиль (username)
+        console.log('[SoundCloud] Загружаем лайки профиля:', url);
+        // Скачиваем страницу профиля и ищем в ней API токен (client_id)
+        const profileRes = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const clientIdMatch = profileRes.data.match(/client_id:"(.*?)"/);
+        
+        if (clientIdMatch) {
+          const clientId = clientIdMatch[1];
+          // Получаем ID пользователя
+          const userRes = await axios.get(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}&client_id=${clientId}`);
+          // Получаем его лайки
+          const likesRes = await axios.get(`https://api-v2.soundcloud.com/users/${userRes.data.id}/likes?client_id=${clientId}&limit=100`);
+          const rawTracks = likesRes.data.collection.map(item => item.track || item);
+          result = { collection: rawTracks };
+        } else {
+          throw new Error('Не удалось получить доступ к API SoundCloud');
+        }
+      }
+    }
+    
+    if (!result.collection || result.collection.length === 0) {
+      return res.json({ tracks: [], message: 'Треки не найдены' });
     }
 
-    // Одиночный трек
-    const parts = url.replace('https://soundcloud.com/', '').split('/');
-    if (parts.length >= 2 && !url.includes('/likes')) {
-      const info = await scdl.getInfo(url);
-      const track = {
-        id: info.id, title: info.title, artist_name: info.user.username,
-        cover_url: info.artwork_url ? info.artwork_url.replace('large', 't500x500') : null,
-        duration: Math.round(info.duration / 1000), permalink_url: info.permalink_url,
-        stream_url: `/api/search/stream?url=${encodeURIComponent(info.permalink_url)}`, is_external: false
-      };
-      return res.json({ tracks: [track] });
-    }
-
-    // Профиль (Лайки)
-    const username = parts[0];
-    const clientId = await getClientId();
-    if (!clientId) throw new Error('Не удалось получить Client ID');
-
-    // 1. Получаем ID пользователя
-    const userRes = await axios.get(`https://api-v2.soundcloud.com/resolve?url=https://soundcloud.com/${username}&client_id=${clientId}`);
-    const userId = userRes.data.id;
-
-    // 2. Запрашиваем его лайки (до 100 штук)
-    const likesRes = await axios.get(`https://api-v2.soundcloud.com/users/${userId}/likes?client_id=${clientId}&limit=100`);
-    const rawTracks = likesRes.data.collection.map(item => item.track || item);
-
-    const tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => ({
-      id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
-      cover_url: track.artwork_url ? track.artwork_url.replace('large', 't500x500') : null,
-      duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
-      stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
-    }));
-
+    const tracks = result.collection
+      .filter(track => track && track.duration < 900000)
+      .map(track => {
+        let cover = track.artwork_url || (track.user && track.user.avatar_url);
+        if (cover) cover = cover.replace('large', 't500x500');
+        return {
+          id: track.id, 
+          title: track.title, 
+          artist_name: track.user ? track.user.username : 'Неизвестен',
+          cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
+          duration: Math.round(track.duration / 1000), 
+          permalink_url: track.permalink_url,
+          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, 
+          is_external: false 
+        };
+      });
+      
     res.json({ tracks });
-
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    res.status(500).json({ error: 'Ошибка импорта. Убедитесь, что профиль открыт для всех.' }); 
+    res.status(500).json({ error: 'Ошибка импорта. Профиль скрыт или SoundCloud блокирует сервер.' }); 
   }
 });
 
