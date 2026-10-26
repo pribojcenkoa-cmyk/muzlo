@@ -93,7 +93,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2.1. Загрузка треков конкретного альбома (Устойчивый метод)
+// 2.1. Загрузка треков конкретного альбома (Тройная защита)
 router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
@@ -101,45 +101,75 @@ router.get('/album', async (req, res) => {
 
     // Очищаем ссылку от параметров
     albumUrl = albumUrl.split('?')[0];
-
     console.log(`[SoundCloud Album] Загрузка: ${albumUrl}`);
 
-    // Попытка 1: Стандартный метод scdl
+    // Попытка 1: Стандартный метод scdl (работает локально, но часто падает на Render)
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
       if (playlist && playlist.tracks) {
-        const tracks = playlist.tracks.map(track => formatTrack(track));
-        return res.json({ tracks });
+        return res.json({ tracks: playlist.tracks.map(track => formatTrack(track)) });
       }
     } catch (e) {
-      console.log(`[SoundCloud Album] scdl.getSetInfo не сработал: ${e.message}`);
+      console.log(`[SoundCloud Album] scdl метод упал: ${e.message}`);
     }
 
-    // Попытка 2: Через API v2
+    // Попытка 2: Через API v2 + прокси allorigins
     if (!scdl.client_id) {
       await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
     }
     const clientId = scdl.client_id;
     
     if (clientId) {
-      const resolveRes = await axios.get(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(albumUrl)}&client_id=${clientId}`);
-      if (resolveRes.data && resolveRes.data.id) {
+      const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(albumUrl)}&client_id=${clientId}`;
+      const resolveRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(resolveUrl)}`, {timeout: 10000}).catch(() => null);
+
+      if (resolveRes && resolveRes.data && resolveRes.data.id) {
         const playlistId = resolveRes.data.id;
-        const playlistRes = await axios.get(`https://api-v2.soundcloud.com/playlists/${playlistId}?client_id=${clientId}`);
-        
-        if (playlistRes.data && playlistRes.data.tracks) {
-          const tracks = playlistRes.data.tracks
-            .filter(t => t && t.duration) // Фильтруем удаленные треки
-            .map(track => formatTrack(track));
+        const playlistUrl = `https://api-v2.soundcloud.com/playlists/${playlistId}?client_id=${clientId}`;
+        const playlistRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(playlistUrl)}`, {timeout: 10000}).catch(() => null);
+
+        if (playlistRes && playlistRes.data && playlistRes.data.tracks) {
+          const tracks = playlistRes.data.tracks.filter(t => t && t.duration).map(track => formatTrack(track));
+          console.log(`[SoundCloud Album] Успешно через API v2 (прокси): ${tracks.length} треков`);
           return res.json({ tracks });
         }
       }
     }
 
-    throw new Error('Все методы исчерпаны');
+    // Попытка 3: Через Jina AI (парсим HTML страницы)
+    console.log(`[SoundCloud Album] Пробуем Jina AI...`);
+    const jinaUrl = `https://r.jina.ai/${albumUrl}`;
+    const jinaRes = await axios.get(jinaUrl, {
+        headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' },
+        timeout: 20000
+    });
+    
+    let html = jinaRes.data;
+    if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
+        const startStr = 'window.__sc_hydration = ';
+        const startIndex = html.indexOf(startStr);
+        const endIndex = html.indexOf('</script>', startIndex);
+        let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
+        if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
+
+        const hydration = JSON.parse(jsonStr);
+        // Ищем данные плейлиста в гидратации
+        const playlistData = hydration.find(item => item.hydratable === 'playlist' || item.hydratable === 'playlistInfo');
+        
+        if (playlistData && playlistData.data) {
+            const tracksData = playlistData.data.tracks || (playlistData.data.playlist && playlistData.data.playlist.tracks);
+            if (tracksData) {
+               const tracks = tracksData.filter(t => t && t.duration).map(track => formatTrack(track));
+               console.log(`[SoundCloud Album] Успешно через Jina AI: ${tracks.length} треков`);
+               return res.json({ tracks });
+            }
+        }
+    }
+
+    throw new Error('Все методы загрузки альбома исчерпаны');
   } catch (err) {
     console.error('[SoundCloud Album] Ошибка:', err.message);
-    res.status(500).json({ error: 'Ошибка загрузки альбома. Возможно, он скрыт или удален.' });
+    res.status(500).json({ error: 'Ошибка загрузки альбома. Сервер заблокирован SoundCloud.' });
   }
 });
 
