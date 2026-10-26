@@ -103,7 +103,7 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна
+// 5. Моя волна (Умная)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
@@ -205,71 +205,70 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (поддержка коротких ссылок и плейлистов)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Универсальный: короткие ссылки, плейлисты, профили)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
+  // Очищаем от параметров
   url = url.split('?')[0].replace(/\/$/, '');
   
   try {
-    // Расшифровка короткой ссылки (on.soundcloud.com) через OEmbed API
+    // 1. Расшифровка короткой ссылки (on.soundcloud.com)
     if (url.includes('on.soundcloud.com')) {
-      console.log('[SoundCloud] Расшифровываем короткую ссылку:', url);
       try {
-        const oembedRes = await axios.get(
-          `https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`,
-          { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 }
-        );
-        if (oembedRes.data && oembedRes.data.url) {
-          url = oembedRes.data.url.split('?')[0].replace(/\/$/, '');
-          console.log('[SoundCloud] Полный URL:', url);
+        const redirect = await axios.get(url, { maxRedirects: 0, validateStatus: () => true, headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (redirect.headers.location) {
+          url = redirect.headers.location.split('?')[0].replace(/\/$/, '');
         }
       } catch (e) {
-        console.log('[SoundCloud] OEmbed не сработал:', e.message);
+        // Если редирект не сработал, пробуем oembed
+        try {
+          const oembed = await axios.get(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+          if (oembed.data && oembed.data.url) url = oembed.data.url.split('?')[0].replace(/\/$/, '');
+        } catch (err) {}
       }
     }
 
-    let result;
-    
-    // Плейлист (в ссылке есть /sets/)
-    if (url.includes('/sets/')) {
-      console.log('[SoundCloud] Загружаем плейлист:', url);
-      const playlist = await scdl.getPlaylist(url);
-      result = { collection: playlist.tracks };
-    } 
-    // Иначе считаем, что это профиль — грузим лайки
-    else {
-      console.log('[SoundCloud] Загружаем лайки профиля:', url);
-      const likesUrl = `${url}/likes`;
-      result = await scdl.getTracks({ url: likesUrl, limit: 100 });
-    }
-    
-    if (!result.collection || result.collection.length === 0) {
-      return res.json({ tracks: [], message: 'Треки не найдены (профиль закрыт или плейлист пуст)' });
-    }
+    let tracks = [];
 
-    const tracks = result.collection
-      .filter(track => track && track.duration < 900000)
-      .map(track => {
+    // 2. Если это плейлист (/sets/)
+    if (url.includes('/sets/')) {
+      const playlist = await scdl.getSetInfo(url);
+      tracks = playlist.tracks.map(track => {
         let cover = track.artwork_url || (track.user && track.user.avatar_url);
         if (cover) cover = cover.replace('large', 't500x500');
         return {
-          id: track.id, 
-          title: track.title, 
-          artist_name: track.user ? track.user.username : 'Неизвестен',
+          id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
           cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-          duration: Math.round(track.duration / 1000), 
-          permalink_url: track.permalink_url,
-          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, 
-          is_external: false 
+          duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
+          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
         };
       });
-      
+      return res.json({ tracks });
+    }
+
+    // 3. Если это одиночный трек (есть слэш и это не просто имя юзера)
+    const parts = url.replace('https://soundcloud.com/', '').split('/');
+    if (parts.length >= 2 && !url.includes('/likes')) {
+      const info = await scdl.getInfo(url);
+      tracks = [{
+        id: info.id, title: info.title, artist_name: info.user.username,
+        cover_url: info.artwork_url ? info.artwork_url.replace('large', 't500x500') : null,
+        duration: Math.round(info.duration / 1000), permalink_url: info.permalink_url,
+        stream_url: `/api/search/stream?url=${encodeURIComponent(info.permalink_url)}`, is_external: false
+      }];
+      return res.json({ tracks });
+    }
+
+    // 4. Если это профиль — ищем треки по имени пользователя
+    const username = parts[0];
+    tracks = await searchSoundCloud(username);
     res.json({ tracks });
+
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err);
-    res.status(500).json({ error: 'Ошибка импорта. Проверьте, что профиль/плейлист открыт для всех.' }); 
+    res.status(500).json({ error: 'Ошибка импорта. Проверьте ссылку.' }); 
   }
 });
 
@@ -300,10 +299,7 @@ router.get('/import-yandex', async (req, res) => {
 
     for (const proxyUrl of PROXIES) {
       try {
-        const response = await axios.get(proxyUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-          timeout: 8000
-        });
+        const response = await axios.get(proxyUrl, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }, timeout: 8000 });
         if (response.data && response.data.playlist && response.data.playlist.tracks) {
           parsedTracks = response.data.playlist.tracks;
           break;
@@ -328,7 +324,7 @@ router.get('/import-yandex', async (req, res) => {
   }
 
   if (parsedTracks.length === 0) {
-    return res.status(404).json({ error: 'Яндекс блокирует все прокси. Пожалуйста, используйте SoundCloud или вставку текстом.' });
+    return res.status(404).json({ error: 'Яндекс блокирует запросы с сервера. Пожалуйста, используйте вставку текстом.' });
   }
 
   const tracks = [];
@@ -348,7 +344,7 @@ router.get('/import-yandex', async (req, res) => {
   res.json({ tracks });
 });
 
-// 10. ИМПОРТ ИЗ ТЕКСТА (Список треков)
+// 10. ИМПОРТ ИЗ ТЕКСТА
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
   if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список треков' });
