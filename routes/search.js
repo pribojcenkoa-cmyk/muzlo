@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
     ]);
 
     const albums = playlistsRes.collection
-      .filter(pl => pl.permalink_url)
+      .filter(pl => pl.permalink_url) // Защита от битых ссылок
       .map(pl => {
         let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
         if (cover) cover = cover.replace('large', 't500x500');
@@ -114,7 +114,7 @@ router.get('/album', async (req, res) => {
       }
     } catch (e) {}
 
-    // Попытка 2: Jina AI HTML (парсим скрипты)
+    // Попытка 2: Jina AI HTML
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' }, timeout: 15000 });
@@ -140,7 +140,7 @@ router.get('/album', async (req, res) => {
       }
     } catch (e) {}
 
-    // Попытка 3: Jina AI Text (ищем ссылки)
+    // Попытка 3: Jina AI Text
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 15000 });
@@ -464,33 +464,63 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг (С поддержкой перемотки через scdl.stream)
+// 12. Стриминг (Исправлена перемотка с помощью Accept-Encoding: identity)
 router.get('/stream', async (req, res) => {
   const trackUrl = req.query.url;
   if (!trackUrl) return res.status(400).send('URL required');
 
   try {
-    // scdl.stream сам обрабатывает заголовки и запрашивает нужный кусок (Range)
-    const stream = await scdl.stream(trackUrl);
-    
+    // 1. Получаем информацию о треке
+    const info = await scdl.getInfo(trackUrl);
+    let streamUrl = null;
+
+    // 2. Ищем прямой mp3 поток (progressive)
+    if (info.media && info.media.transcodings) {
+      const progressive = info.media.transcodings.find(t => t.format.protocol === 'progressive');
+      if (progressive) {
+        if (!scdl.client_id) {
+          await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
+        }
+        const transUrl = `${progressive.url}?client_id=${scdl.client_id}`;
+        const transRes = await axios.get(transUrl);
+        streamUrl = transRes.data.url; // Прямая ссылка на CDN
+      }
+    }
+
+    if (streamUrl) {
+      const range = req.headers.range;
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://soundcloud.com/',
+        'Origin': 'https://soundcloud.com',
+        'Accept': '*/*',
+        'Accept-Encoding': 'identity' // КРИТИЧЕСКИ ВАЖНО для перемотки!
+      };
+      if (range) headers['Range'] = range;
+
+      const response = await axios.get(streamUrl, { headers, responseType: 'stream' });
+
+      res.status(response.status);
+      if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+      if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+      return response.data.pipe(res);
+    }
+  } catch (err) {
+    console.log('Ошибка прямого стриминга, переключаемся на fallback:', err.message);
+  }
+
+  // 3. Запасной вариант (без перемотки, но гарантированно играет)
+  try {
+    const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    
     stream.pipe(res);
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);
-    
-    // Если scdl.stream упал, пробуем обычный download (без перемотки, но играет)
-    try {
-        console.log('Стриминг через scdl.stream упал, пробуем scdl.download');
-        const dlStream = await scdl.download(trackUrl);
-        res.setHeader('Content-Type', 'audio/mpeg');
-        dlStream.pipe(res);
-    } catch(e) {
-        console.error('Все методы стриминга упали:', e.message);
-        if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
-    }
+    if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
   }
 });
 
