@@ -46,6 +46,14 @@
       </div>
     </header>
 
+    <!-- АДМИН-ВИДЖЕТ (покажется только админу) -->
+    <div id="admin-widget" style="display: none; margin-bottom: 20px; padding: 15px 20px; background: linear-gradient(90deg, #1a3a24, #0f2815); border: 1px solid #1db954; border-radius: 12px; color: #fff; font-size: 14px;">
+      <span style="color: #1db954; font-weight: 700;">● ADMIN</span>
+      <span style="margin-left: 15px;">Онлайн: <b id="admin-online">0</b></span>
+      <span style="margin-left: 15px;">Всего юзеров: <b id="admin-total">0</b></span>
+      <span style="margin-left: 15px;">Прослушиваний за сутки: <b id="admin-plays">0</b></span>
+    </div>
+
     <div id="profile-stats" style="display: none; margin-bottom: 20px; padding: 20px; background: #181818; border-radius: 12px; color: #fff;"></div>
     
     <div class="track-list" id="track-list"></div>
@@ -119,7 +127,6 @@
       
       <input type="text" id="import-url" placeholder="https://soundcloud.com/ваш_ник">
       
-      <!-- Поле для списка треков -->
       <textarea id="import-text" placeholder="Или вставьте список треков (Артист - Название), каждый с новой строки" style="width: 100%; height: 100px; margin-bottom: 16px; padding: 12px; background: #121212; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 14px; box-sizing: border-box; resize: vertical;"></textarea>
       
       <button type="button" class="btn-submit" id="btn-do-import">Загрузить</button>

@@ -57,3 +57,6 @@ console.log('Длина ключа:', process.env.JWT_SECRET ? process.env.JWT_S
 console.log('===================');
   console.log(`Сервер запущен: http://localhost:${PORT}`);
 });
+import adminRoutes from './routes/admin.js';
+// ...
+app.use('/api/admin', adminRoutes);

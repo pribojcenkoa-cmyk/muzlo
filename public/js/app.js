@@ -10,6 +10,7 @@ const navLibrary = document.getElementById('nav-library');
 const navWave = document.getElementById('nav-wave');
 const navProfile = document.getElementById('nav-profile');
 const profileStats = document.getElementById('profile-stats');
+const adminWidget = document.getElementById('admin-widget');
 const btnPlay = document.getElementById('btn-play');
 const btnNext = document.getElementById('btn-next');
 const btnPrev = document.getElementById('btn-prev');
@@ -39,10 +40,11 @@ let isPlaying = false;
 let isLoginMode = true;
 let currentTrackRealDuration = 0;
 let isSeeking = false;
-let lastSearchQuery = ''; 
-let userLikedTrackIds = new Set(); 
+let lastSearchQuery = '';
+let userLikedTrackIds = new Set();
+let adminInterval = null;
 
-// Web Audio API для усиления звука
+// Web Audio API для усиления
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
@@ -58,8 +60,8 @@ const formatTime = (seconds) => {
 const getValidCover = (url) => url || '/img/default-cover.png';
 
 function getStreamUrl(track) {
-  if (track.stream_url) return track.stream_url; 
-  if (track.is_external && track.file_url) return track.file_url; 
+  if (track.stream_url) return track.stream_url;
+  if (track.is_external && track.file_url) return track.file_url;
   return `/api/tracks/${track.id}/stream`;
 }
 
@@ -97,6 +99,22 @@ async function loadUserLikes() {
       userLikedTrackIds = new Set(data.tracks.map(t => String(t.id)));
     }
   } catch (err) {}
+}
+
+async function loadAdminStats() {
+  try {
+    const res = await fetch('/api/admin/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const onlineEl = document.getElementById('admin-online');
+    const totalEl = document.getElementById('admin-total');
+    const playsEl = document.getElementById('admin-plays');
+    if (onlineEl) onlineEl.textContent = data.online;
+    if (totalEl) totalEl.textContent = data.total_users;
+    if (playsEl) playsEl.textContent = data.plays_today;
+  } catch (err) {
+    console.error('Ошибка загрузки админ-статистики:', err);
+  }
 }
 
 async function performSearch(query) {
@@ -147,7 +165,7 @@ async function restorePlayerState() {
     }
     currentTrackRealDuration = track.duration || 0;
     totalTimeEl.textContent = formatTime(currentTrackRealDuration);
-    
+
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
     btnPlay.textContent = '▶';
@@ -175,9 +193,9 @@ function renderTracks(tracksArray, isLibrary = false) {
     const div = document.createElement('div');
     div.className = 'track-item';
     div.dataset.index = index;
-    
+
     const isLiked = userLikedTrackIds.has(String(track.id));
-    let actionBtnHTML = isLibrary 
+    let actionBtnHTML = isLibrary
       ? `<button class="btn-delete" title="Удалить">✕</button>`
       : `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
 
@@ -192,12 +210,12 @@ function renderTracks(tracksArray, isLibrary = false) {
     `;
 
     div.querySelector('.track-cover').onerror = function() {
-      this.onerror = null; 
+      this.onerror = null;
       this.src = '/img/default-cover.png';
     };
 
     div.addEventListener('click', (e) => {
-      if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return; 
+      if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return;
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
@@ -212,7 +230,7 @@ function renderTracks(tracksArray, isLibrary = false) {
         try {
           const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
           if (res.ok) {
-            userLikedTrackIds.delete(String(track.id)); 
+            userLikedTrackIds.delete(String(track.id));
             navLibrary.click();
           }
         } catch (err) {}
@@ -220,7 +238,7 @@ function renderTracks(tracksArray, isLibrary = false) {
     } else {
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (actionBtn.classList.contains('liked')) return; 
+        if (actionBtn.classList.contains('liked')) return;
 
         try {
           const streamUrl = getStreamUrl(track);
@@ -235,10 +253,10 @@ function renderTracks(tracksArray, isLibrary = false) {
           if (res.status === 401) {
             alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
           }
-          if (res.ok) { 
-            actionBtn.classList.add('liked'); 
-            actionBtn.textContent = '❤'; 
-            userLikedTrackIds.add(String(track.id)); 
+          if (res.ok) {
+            actionBtn.classList.add('liked');
+            actionBtn.textContent = '❤';
+            userLikedTrackIds.add(String(track.id));
           }
         } catch (err) {}
       });
@@ -262,7 +280,7 @@ async function loadArtistPage(artistName) {
   searchContainer.style.display = 'none';
   profileStats.style.display = 'none';
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
-  
+
   try {
     const res = await fetchWithTimeout(`/api/search/artist?name=${encodeURIComponent(artistName)}`);
     const data = await res.json();
@@ -289,7 +307,7 @@ function playTrack(track) {
 
   playerTitle.textContent = track.title;
   playerArtist.textContent = track.artist_name || 'Неизвестен';
-  
+
   if (track.cover_url) {
     playerCover.src = track.cover_url;
     playerCover.classList.remove('hidden');
@@ -302,12 +320,12 @@ function playTrack(track) {
   seekSlider.value = 0;
 
   audioPlayer.src = getStreamUrl(track);
-  
+
   audioPlayer.play().then(() => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
     savePlayerState();
-    
+
     fetch('/api/search/history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -388,7 +406,6 @@ seekSlider.addEventListener('change', () => {
   savePlayerState();
 });
 
-// УПРАВЛЕНИЕ ГРОМКОСТЬЮ (с усилением до 300%)
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -398,7 +415,7 @@ function updateVolume() {
     audioPlayer.volume = value / 100;
   } else {
     audioPlayer.volume = 1;
-    if (gainNode) gainNode.gain.value = value / 100; // 1.0 - 3.0
+    if (gainNode) gainNode.gain.value = value / 100;
   }
 }
 
@@ -424,7 +441,7 @@ function switchTab(activeTab, title, showSearch = false) {
 navHome.addEventListener('click', async () => {
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
-  await loadUserLikes(); 
+  await loadUserLikes();
   try {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
@@ -468,14 +485,14 @@ navProfile.addEventListener('click', async () => {
       return;
     }
     const data = await res.json();
-    
+
     const hours = Math.floor(data.total_seconds / 3600);
     const minutes = Math.floor((data.total_seconds % 3600) / 60);
 
     profileStats.innerHTML = `
       <h2 style="margin-bottom: 20px;">Статистика прослушиваний</h2>
       <p style="font-size: 18px; margin-bottom: 20px;">Всего прослушано: <strong style="color:#1db954;">${hours} ч ${minutes} мин</strong></p>
-      
+
       <h3 style="margin-bottom: 10px;">Топ артистов:</h3>
       <ul style="list-style: none; padding: 0; margin-bottom: 20px;">
         ${data.top_artists.map(a => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${a.artist_name} — <span style="color:#b3b3b3;">${a.count} раз</span></li>`).join('') || '<li>Нет данных</li>'}
@@ -507,7 +524,7 @@ let searchTimeout;
 searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const query = e.target.value.trim();
-  lastSearchQuery = query; 
+  lastSearchQuery = query;
   if (query.length < 2) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
     return;
@@ -541,10 +558,20 @@ authContainer.addEventListener('click', (e) => {
 function updateAuthUI(user) {
   if (user) {
     authContainer.innerHTML = `<div class="profile-info"><span>👤 ${user.email}</span><button class="btn-logout" id="btn-logout">Выйти</button></div>`;
-    loadUserLikes(); 
+    loadUserLikes();
+
+    // Виджет админа
+    if (user.role === 'admin' && adminWidget) {
+      adminWidget.style.display = 'block';
+      loadAdminStats();
+      if (adminInterval) clearInterval(adminInterval);
+      adminInterval = setInterval(loadAdminStats, 30000);
+    }
   } else {
     authContainer.innerHTML = `<button class="btn-auth" id="btn-open-auth">Войти</button>`;
-    userLikedTrackIds.clear(); 
+    userLikedTrackIds.clear();
+    if (adminWidget) adminWidget.style.display = 'none';
+    if (adminInterval) { clearInterval(adminInterval); adminInterval = null; }
   }
 }
 
@@ -596,8 +623,8 @@ async function checkAuth() {
 if (importBtn) {
   importBtn.addEventListener('click', () => {
     importModal.classList.add('active');
-    importStatus.textContent = ''; 
-    importUrlInput.value = ''; 
+    importStatus.textContent = '';
+    importUrlInput.value = '';
     importTextInput.value = '';
   });
 }
@@ -609,9 +636,9 @@ btnDoImport.addEventListener('click', async () => {
   const url = importUrlInput.value.trim();
   const text = importTextInput.value.trim();
 
-  // 1. Если пользователь вставил текст (для Яндекса)
+  // 1. Импорт через текст (Яндекс)
   if (text) {
-    importStatus.style.color = '#1db954'; 
+    importStatus.style.color = '#1db954';
     importStatus.textContent = 'Ищем треки в SoundCloud...';
     btnDoImport.disabled = true;
 
@@ -645,7 +672,7 @@ btnDoImport.addEventListener('click', async () => {
     return;
   }
 
-  // 2. Если пользователь вставил ссылку (для SoundCloud)
+  // 2. Импорт через ссылку (SoundCloud)
   if (!url) {
     importStatus.style.color = '#ff4d4d';
     importStatus.textContent = 'Введите ссылку или вставьте список треков';
@@ -666,7 +693,7 @@ btnDoImport.addEventListener('click', async () => {
     return;
   }
 
-  importStatus.style.color = '#1db954'; 
+  importStatus.style.color = '#1db954';
   importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
   btnDoImport.disabled = true;
 
@@ -695,7 +722,7 @@ btnDoImport.addEventListener('click', async () => {
 });
 
 // 10. СТАРТ
-initAudioContext(); 
-restorePlayerState(); 
+initAudioContext();
+restorePlayerState();
 checkAuth();
 navHome.click();
