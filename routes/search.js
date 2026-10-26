@@ -20,16 +20,17 @@ const POPULAR_ARTISTS = [
 ];
 
 function formatTrack(track) {
+  if (!track) return null;
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
   if (cover) cover = cover.replace('large', 't500x500');
   return {
     id: track.id,
-    title: track.title,
+    title: track.title || 'Без названия',
     artist_name: track.user ? track.user.username : 'Неизвестен',
     cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-    duration: Math.round(track.duration / 1000),
+    duration: Math.round((track.duration || 0) / 1000),
     permalink_url: track.permalink_url,
-    stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`,
+    stream_url: track.permalink_url ? `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}` : null,
     is_external: false 
   };
 }
@@ -93,55 +94,58 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2.1. Загрузка треков конкретного альбома (Надежный метод через Jina AI Text)
+// 2.1. Загрузка треков конкретного альбома
 router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
-    if (!albumUrl) return res.status(400).json({ error: 'URL не передан' });
+    if (!albumUrl || albumUrl === 'undefined') return res.status(400).json({ error: 'URL не передан' });
     albumUrl = albumUrl.split('?')[0];
 
     console.log(`[SoundCloud Album] Загрузка: ${albumUrl}`);
 
-    // 1. Пробуем напрямую через scdl (сработает, если Render не заблокирован)
+    // Попытка 1: Стандартный метод scdl
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
-      if (playlist && playlist.tracks) {
-        console.log(`[SoundCloud Album] Способ 1 (scdl) успешно`);
-        return res.json({ tracks: playlist.tracks.map(track => formatTrack(track)) });
+      if (playlist && playlist.tracks && playlist.tracks.length > 0) {
+        const validTracks = playlist.tracks.filter(t => t && t.permalink_url).map(track => formatTrack(track)).filter(Boolean);
+        if (validTracks.length > 0) {
+          console.log(`[SoundCloud Album] Способ 1 (scdl) успешно. Треков: ${validTracks.length}`);
+          return res.json({ tracks: validTracks });
+        }
       }
     } catch (e) {
       console.log(`[SoundCloud Album] Способ 1 (scdl) упал: ${e.message}`);
     }
 
-    // 2. Пробуем через Jina AI (ищем ссылки на треки в тексте страницы)
-    console.log(`[SoundCloud Album] Пробуем Jina AI (Text)...`);
-    const jinaUrl = `https://r.jina.ai/${albumUrl}`;
-    const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
-    const text = jinaRes.data;
-    
-    // Ищем ссылки формата soundcloud.com/user/track
-    const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
-    
-    // Очищаем от системных ссылок
-    const trackUrls = [...new Set(urlMatches)].filter(u => {
-      const p = u.replace('https://soundcloud.com/', '').split('/');
-      return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
-    });
+    // Попытка 2: Jina AI (Text)
+    try {
+      console.log(`[SoundCloud Album] Пробуем Jina AI (Text)...`);
+      const jinaUrl = `https://r.jina.ai/${albumUrl}`;
+      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
+      const text = jinaRes.data;
+      
+      const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
+      const trackUrls = [...new Set(urlMatches)].filter(u => {
+        const p = u.replace('https://soundcloud.com/', '').split('/');
+        return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
+      });
 
-    if (trackUrls.length > 0) {
-      console.log(`[SoundCloud Album] Jina AI нашел ${trackUrls.length} ссылок. Загружаем данные...`);
-      const tracks = [];
-      // Ограничиваем до 20 треков, чтобы не превысить лимит времени на Render (30 сек)
-      for (const tUrl of trackUrls.slice(0, 20)) {
-        try {
-          const info = await scdl.getInfo(tUrl);
-          tracks.push(formatTrack(info));
-        } catch (e) {}
+      if (trackUrls.length > 0) {
+        const tracks = [];
+        for (const tUrl of trackUrls.slice(0, 30)) {
+          try {
+            const info = await scdl.getInfo(tUrl);
+            const formatted = formatTrack(info);
+            if (formatted) tracks.push(formatted);
+          } catch (e) {}
+        }
+        if (tracks.length > 0) {
+          console.log(`[SoundCloud Album] Успешно загружено ${tracks.length} треков`);
+          return res.json({ tracks });
+        }
       }
-      if (tracks.length > 0) {
-        console.log(`[SoundCloud Album] Успешно загружено ${tracks.length} треков`);
-        return res.json({ tracks });
-      }
+    } catch (e) {
+      console.log(`[SoundCloud Album] Способ 2 (Jina Text) упал: ${e.message}`);
     }
 
     throw new Error('Не удалось найти треки в альбоме');
@@ -304,7 +308,7 @@ router.get('/import-likes', async (req, res) => {
 
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
-      const tracks = playlist.tracks.map(track => formatTrack(track));
+      const tracks = playlist.tracks.map(track => formatTrack(track)).filter(Boolean);
       return res.json({ tracks });
     }
 
