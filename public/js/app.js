@@ -290,12 +290,18 @@ function renderTracks(tracksArray, isLibrary = false) {
           if (res.status === 401) {
             alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
           }
+          
           if (res.ok) {
             actionBtn.classList.add('liked');
             actionBtn.textContent = '❤';
             userLikedTrackIds.add(String(track.id));
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            alert(`Ошибка сохранения: ${errData.error || 'Сервер не отвечает'}`);
           }
-        } catch (err) {}
+        } catch (err) {
+          alert('Ошибка сети при сохранении трека');
+        }
       });
     }
     trackListEl.appendChild(div);
@@ -750,7 +756,6 @@ navLibrary.addEventListener('click', async () => {
   switchTab(navLibrary, 'Моя медиатека');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   try {
-    // Запрашиваем и треки, и альбомы
     const [resTracks, resAlbums] = await Promise.all([
       fetch('/api/library'),
       fetch('/api/library/albums')
@@ -764,18 +769,14 @@ navLibrary.addEventListener('click', async () => {
     const dataTracks = await resTracks.json();
     const dataAlbums = resAlbums.ok ? await resAlbums.json() : { albums: [] };
 
-    // Выводим в консоль для отладки
-    console.log("Библиотека треков с сервера:", dataTracks);
-    
     renderLibraryPage(dataTracks.tracks || [], dataAlbums.albums || []);
 
   } catch (err) {
-    console.error(err);
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 });
 
-// Новая функция для отрисовки медиатеки (Альбомы + Треки)
+// Функция для отрисовки медиатеки (Альбомы + Треки)
 function renderLibraryPage(tracks, albums) {
   trackListEl.innerHTML = '';
   
@@ -1187,19 +1188,19 @@ restorePlayerState();
 checkAuth();
 navHome.click();
 
-// --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ) ---
+// --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ и F12) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
 
 document.addEventListener('keydown', function(e) {
-  if (e.keyCode === 123) {
+  if (e.keyCode === 123) { // F12
     e.preventDefault();
     return false;
   }
-  if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) {
+  if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) { // Ctrl+Shift+I / J
     e.preventDefault();
     return false;
   }
-  if (e.ctrlKey && e.keyCode === 85) {
+  if (e.ctrlKey && e.keyCode === 85) { // Ctrl+U
     e.preventDefault();
     return false;
   }

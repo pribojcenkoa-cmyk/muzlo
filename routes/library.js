@@ -12,6 +12,7 @@ router.get('/', requireAuth, async (req, res) => {
     const result = await query('SELECT * FROM user_library WHERE user_id = $1 ORDER BY added_at DESC', [req.user.id]);
     res.json({ tracks: result.rows });
   } catch (err) {
+    console.error('Ошибка получения треков:', err);
     res.status(500).json({ error: 'Ошибка получения медиатеки' });
   }
 });
@@ -20,6 +21,8 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, cover_url, duration, stream_url } = req.body;
+    if (!track_id) return res.status(400).json({ error: 'Нет ID трека' });
+    
     const existing = await query('SELECT id FROM user_library WHERE user_id = $1 AND track_id = $2', [req.user.id, track_id]);
     if (existing.rows.length > 0) return res.json({ success: true });
 
@@ -29,6 +32,7 @@ router.post('/', requireAuth, async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) {
+    console.error('Ошибка добавления трека:', err);
     res.status(500).json({ error: 'Ошибка добавления трека' });
   }
 });
@@ -39,6 +43,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
     await query('DELETE FROM user_library WHERE user_id = $1 AND track_id = $2', [req.user.id, req.params.id]);
     res.json({ success: true });
   } catch (err) {
+    console.error('Ошибка удаления трека:', err);
     res.status(500).json({ error: 'Ошибка удаления трека' });
   }
 });
@@ -52,6 +57,7 @@ router.get('/albums', requireAuth, async (req, res) => {
     const result = await query('SELECT * FROM user_albums WHERE user_id = $1 ORDER BY added_at DESC', [req.user.id]);
     res.json({ albums: result.rows });
   } catch (err) {
+    console.error('Ошибка получения альбомов:', err);
     res.status(500).json({ error: 'Ошибка получения альбомов' });
   }
 });
@@ -69,6 +75,7 @@ router.post('/albums', requireAuth, async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) {
+    console.error('Ошибка сохранения альбома:', err);
     res.status(500).json({ error: 'Ошибка сохранения альбома' });
   }
 });
@@ -79,6 +86,7 @@ router.delete('/albums/:id', requireAuth, async (req, res) => {
     await query('DELETE FROM user_albums WHERE user_id = $1 AND album_id = $2', [req.user.id, req.params.id]);
     res.json({ success: true });
   } catch (err) {
+    console.error('Ошибка удаления альбома:', err);
     res.status(500).json({ error: 'Ошибка удаления альбома' });
   }
 });
