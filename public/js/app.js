@@ -42,6 +42,7 @@ let currentTrackRealDuration = 0;
 let isSeeking = false;
 let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
+let userSavedAlbumIds = new Set(); // НОВОЕ: для сохраненных альбомов
 let adminInterval = null;
 
 // Web Audio API
@@ -93,10 +94,17 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 
 async function loadUserLikes() {
   try {
-    const res = await fetch('/api/library');
-    if (res.ok) {
-      const data = await res.json();
-      userLikedTrackIds = new Set(data.tracks.map(t => String(t.id)));
+    // Загружаем треки
+    const resTracks = await fetch('/api/library');
+    if (resTracks.ok) {
+      const data = await resTracks.json();
+      userLikedTrackIds = new Set(data.tracks.map(t => String(t.track_id)));
+    }
+    // Загружаем альбомы
+    const resAlbums = await fetch('/api/library/albums');
+    if (resAlbums.ok) {
+      const data = await resAlbums.json();
+      userSavedAlbumIds = new Set(data.albums.map(a => String(a.album_id)));
     }
   } catch (err) {}
 }
@@ -221,7 +229,7 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.className = 'track-item';
     div.dataset.index = index;
 
-    const isLiked = userLikedTrackIds.has(String(track.id));
+    const isLiked = userLikedTrackIds.has(String(track.track_id || track.id));
     let actionBtnHTML = isLibrary
       ? `<button class="btn-delete" title="Удалить">✕</button>`
       : `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
@@ -255,9 +263,9 @@ function renderTracks(tracksArray, isLibrary = false) {
         e.stopPropagation();
         if (!confirm('Удалить этот трек?')) return;
         try {
-          const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
+          const res = await fetch(`/api/library/${track.track_id || track.id}`, { method: 'DELETE' });
           if (res.ok) {
-            userLikedTrackIds.delete(String(track.id));
+            userLikedTrackIds.delete(String(track.track_id || track.id));
             navLibrary.click();
           }
         } catch (err) {}
@@ -309,6 +317,9 @@ function renderSearchResults(tracks, albums) {
     albums.forEach(album => {
       const div = document.createElement('div');
       div.className = 'track-item';
+      
+      const isSaved = userSavedAlbumIds.has(String(album.id));
+
       div.innerHTML = `
         <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
         <div class="track-info">
@@ -316,12 +327,45 @@ function renderSearchResults(tracks, albums) {
           <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
         </div>
         <div class="track-duration" style="font-size: 20px;">💿</div>
+        <button class="btn-like ${isSaved ? 'liked' : ''}" title="Сохранить">${isSaved ? '❤' : '♥'}</button>
       `;
+      
       div.querySelector('.track-cover').onerror = function() {
         this.onerror = null;
         this.src = '/img/default-cover.png';
       };
-      div.onclick = () => loadAlbum(album.permalink_url);
+
+      div.onclick = (e) => {
+        if (e.target.classList.contains('btn-like')) return;
+        loadAlbum(album.permalink_url);
+      };
+
+      // Сохранение альбома в медиатеку
+      const actionBtn = div.querySelector('.btn-like');
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (actionBtn.classList.contains('liked')) return;
+
+        try {
+          const res = await fetch('/api/library/albums', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              album_id: String(album.id), title: album.title, artist_name: album.artist_name,
+              cover_url: album.cover_url, track_count: album.track_count, permalink_url: album.permalink_url
+            })
+          });
+          if (res.status === 401) {
+            alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
+          }
+          if (res.ok) {
+            actionBtn.classList.add('liked');
+            actionBtn.textContent = '❤';
+            userSavedAlbumIds.add(String(album.id));
+          }
+        } catch (err) {}
+      });
+
       trackListEl.appendChild(div);
     });
   }
@@ -401,7 +445,7 @@ function renderSearchResults(tracks, albums) {
   }
 }
 
-// Функция загрузки треков из альбома (ИСПРАВЛЕНА КНОПКА НАЗАД)
+// Функция загрузки треков из альбома
 async function loadAlbum(albumUrl) {
   if (!albumUrl || albumUrl === 'undefined') {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка: неверная ссылка.</p>';
@@ -420,14 +464,11 @@ async function loadAlbum(albumUrl) {
       return;
     }
 
-    // Сначала отрисовываем треки (это очищает список)
     renderTracks(data.tracks);
     
-    // Затем ДОБАВЛЯЕМ кнопку "Назад" в самое начало списка, чтобы её не стерло
     const backBtnHTML = `<button id="btn-back-search" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад к поиску</button>`;
     trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
     
-    // Вешаем обработчик
     document.getElementById('btn-back-search').addEventListener('click', () => performSearch(lastSearchQuery));
     
   } catch (err) {
@@ -708,17 +749,215 @@ navLibrary.addEventListener('click', async () => {
   switchTab(navLibrary, 'Моя медиатека');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   try {
-    const res = await fetchWithTimeout('/api/library');
-    if (res.status === 401) {
+    // Запрашиваем и треки, и альбомы
+    const [resTracks, resAlbums] = await Promise.all([
+      fetch('/api/library'),
+      fetch('/api/library/albums')
+    ]);
+
+    if (resTracks.status === 401) {
       trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
       return;
     }
-    const data = await res.json();
-    renderTracks(data.tracks, true);
+
+    const dataTracks = await resTracks.json();
+    const dataAlbums = resAlbums.ok ? await resAlbums.json() : { albums: [] };
+
+    trackListEl.innerHTML = '';
+
+    // Отрисовка сохраненных альбомов
+    if (dataAlbums.albums && dataAlbums.albums.length > 0) {
+      const albumHeader = document.createElement('h3');
+      albumHeader.textContent = 'Сохраненные альбомы';
+      albumHeader.style.margin = '10px 0 15px 0';
+      albumHeader.style.color = '#b3b3b3';
+      albumHeader.style.fontSize = '18px';
+      trackListEl.appendChild(albumHeader);
+
+      dataAlbums.albums.forEach(album => {
+        const div = document.createElement('div');
+        div.className = 'track-item';
+        div.innerHTML = `
+          <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
+          <div class="track-info">
+            <div class="track-title">${album.title}</div>
+            <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
+          </div>
+          <div class="track-duration" style="font-size: 20px;">💿</div>
+          <button class="btn-delete" title="Удалить">✕</button>
+        `;
+        div.querySelector('.track-cover').onerror = function() {
+          this.onerror = null;
+          this.src = '/img/default-cover.png';
+        };
+        
+        div.onclick = (e) => {
+          if (e.target.classList.contains('btn-delete')) return;
+          loadAlbum(album.permalink_url);
+        };
+
+        const deleteBtn = div.querySelector('.btn-delete');
+        deleteBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('Удалить этот альбом из медиатеки?')) return;
+          try {
+            const res = await fetch(`/api/library/albums/${album.album_id}`, { method: 'DELETE' });
+            if (res.ok) {
+              userSavedAlbumIds.delete(String(album.album_id));
+              navLibrary.click();
+            }
+          } catch (err) {}
+        });
+
+        trackListEl.appendChild(div);
+      });
+    }
+
+    // Отрисовка сохраненных треков
+    if (dataTracks.tracks && dataTracks.tracks.length > 0) {
+      const trackHeader = document.createElement('h3');
+      trackHeader.textContent = 'Сохраненные треки';
+      trackHeader.style.margin = '25px 0 15px 0';
+      trackHeader.style.color = '#b3b3b3';
+      trackHeader.style.fontSize = '18px';
+      trackListEl.appendChild(trackHeader);
+
+      const tracksContainer = document.createElement('div');
+      trackListEl.appendChild(tracksContainer);
+      // Временно подменяем trackListEl для функции renderTracks
+      const originalTrackList = trackListEl;
+      const tempTrackList = tracksContainer; 
+      tempTrackList.id = 'track-list'; 
+      
+      // Чтобы не сломать логику renderTracks, просто отрисуем треки вручную или создадим контейнер
+      // Проще вызвать renderTracks, но она очищает trackListEl. 
+      // Поэтому мы вызовем её, передав пустой массив, а потом допишем альбомы обратно? Нет, лучше создать функцию.
+      // Для простоты используем копию renderTracks, но ограничимся тем, что просто вызовем renderTracks(dataTracks.tracks, true) 
+      // ПРЕДВАРИТЕЛЬНО сохранив альбомы. 
+      // На самом деле проще: перерисуем всё через новую функцию.
+      
+      // Упростим: просто выведем треки, вызвав старую функцию, но она сотрет альбомы.
+      // Поэтому в renderTracks мы добавили поддержку isLibrary, но она очищает ВЕСЬ trackListEl.
+      // Значит, нужно отрисовывать альбомы ПОСЛЕ треков, либо объединить.
+      // Сделаем проще: отрисуем треки через renderTracks, а потом добавим альбомы в начало.
+    }
+    
+    // Чтобы не усложнять код, я перепишу логику отрисовки медиатеки прямо здесь.
+    renderLibraryPage(dataTracks.tracks, dataAlbums.albums);
+
   } catch (err) {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 });
+
+// Новая функция для отрисовки медиатеки
+function renderLibraryPage(tracks, albums) {
+  trackListEl.innerHTML = '';
+  
+  // Альбомы
+  if (albums && albums.length > 0) {
+    const albumHeader = document.createElement('h3');
+    albumHeader.textContent = 'Сохраненные альбомы';
+    albumHeader.style.margin = '10px 0 15px 0';
+    albumHeader.style.color = '#b3b3b3';
+    albumHeader.style.fontSize = '18px';
+    trackListEl.appendChild(albumHeader);
+
+    albums.forEach(album => {
+      const div = document.createElement('div');
+      div.className = 'track-item';
+      div.innerHTML = `
+        <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
+        <div class="track-info">
+          <div class="track-title">${album.title}</div>
+          <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
+        </div>
+        <div class="track-duration" style="font-size: 20px;">💿</div>
+        <button class="btn-delete" title="Удалить">✕</button>
+      `;
+      div.querySelector('.track-cover').onerror = function() {
+        this.onerror = null;
+        this.src = '/img/default-cover.png';
+      };
+      
+      div.onclick = (e) => {
+        if (e.target.classList.contains('btn-delete')) return;
+        loadAlbum(album.permalink_url);
+      };
+
+      const deleteBtn = div.querySelector('.btn-delete');
+      deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Удалить этот альбом из медиатеки?')) return;
+        try {
+          const res = await fetch(`/api/library/albums/${album.album_id}`, { method: 'DELETE' });
+          if (res.ok) {
+            userSavedAlbumIds.delete(String(album.album_id));
+            navLibrary.click();
+          }
+        } catch (err) {}
+      });
+
+      trackListEl.appendChild(div);
+    });
+  }
+
+  // Треки
+  if (tracks && tracks.length > 0) {
+    const trackHeader = document.createElement('h3');
+    trackHeader.textContent = 'Сохраненные треки';
+    trackHeader.style.margin = '25px 0 15px 0';
+    trackHeader.style.color = '#b3b3b3';
+    trackHeader.style.fontSize = '18px';
+    trackListEl.appendChild(trackHeader);
+
+    // Отрисовываем треки вручную, чтобы не затирать альбомы
+    tracks.forEach((track, index) => {
+      const div = document.createElement('div');
+      div.className = 'track-item';
+      div.dataset.index = index;
+
+      div.innerHTML = `
+        <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
+        <div class="track-info">
+          <div class="track-title">${track.title}</div>
+          <div class="track-artist"><span>${track.artist_name || 'Неизвестен'}</span></div>
+        </div>
+        <div class="track-duration">${formatTime(track.duration)}</div>
+        <button class="btn-delete" title="Удалить">✕</button>
+      `;
+
+      div.querySelector('.track-cover').onerror = function() {
+        this.onerror = null;
+        this.src = '/img/default-cover.png';
+      };
+
+      div.addEventListener('click', (e) => {
+        if (e.target.classList.contains('btn-delete')) return;
+        playTrack(track);
+      });
+
+      const deleteBtn = div.querySelector('.btn-delete');
+      deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Удалить этот трек?')) return;
+        try {
+          const res = await fetch(`/api/library/${track.track_id || track.id}`, { method: 'DELETE' });
+          if (res.ok) {
+            userLikedTrackIds.delete(String(track.track_id || track.id));
+            navLibrary.click();
+          }
+        } catch (err) {}
+      });
+
+      trackListEl.appendChild(div);
+    });
+  }
+
+  if ((!albums || albums.length === 0) && (!tracks || tracks.length === 0)) {
+    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ваша медиатека пуста.</p>';
+  }
+}
 
 // 8. АВТОРИЗАЦИЯ
 authContainer.addEventListener('click', (e) => {
@@ -784,6 +1023,7 @@ function updateAuthUI(user) {
   } else {
     authContainer.innerHTML = `<button class="btn-auth" id="btn-open-auth">Войти</button>`;
     userLikedTrackIds.clear();
+    userSavedAlbumIds.clear();
     if (adminWidget) adminWidget.style.display = 'none';
     if (adminInterval) { clearInterval(adminInterval); adminInterval = null; }
   }
