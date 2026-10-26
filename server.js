@@ -14,6 +14,7 @@ import authRoutes from './routes/auth.js';
 import trackRoutes from './routes/tracks.js';
 import searchRoutes from './routes/search.js';
 import libraryRoutes from './routes/library.js';
+import adminRoutes from './routes/admin.js'; // <-- Перенесли наверх
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tracks', trackRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/library', libraryRoutes);
+app.use('/api/admin', adminRoutes); // <-- Подключили до app.listen
 
 // Проверка работоспособности
 app.get('/api/health', async (req, res) => {
@@ -51,14 +53,10 @@ app.get('/api/health', async (req, res) => {
 app.use((req, res) => res.status(404).json({ error: 'Маршрут не найден' }));
 
 // Запуск
-app.listen(PORT, () => {console.log('=== ДИАГНОСТИКА ===');
-console.log('JWT_SECRET виден серверу:', process.env.JWT_SECRET ? 'ДА' : 'НЕТ');
-console.log('Длина ключа:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 0);
-console.log('===================');
+app.listen(PORT, () => {
+  console.log('=== ДИАГНОСТИКА ===');
+  console.log('JWT_SECRET виден серверу:', process.env.JWT_SECRET ? 'ДА' : 'НЕТ');
+  console.log('Длина ключа:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 0);
+  console.log('===================');
   console.log(`Сервер запущен: http://localhost:${PORT}`);
 });
-import adminRoutes from './routes/admin.js';
-// ...
-app.use('/api/admin', adminRoutes);
-import adminRoutes from './routes/admin.js';
-app.use('/api/admin', adminRoutes);
