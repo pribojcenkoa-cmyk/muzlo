@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
     ]);
 
     const albums = playlistsRes.collection
-      .filter(pl => pl.permalink_url) // Защита от битых ссылок
+      .filter(pl => pl.permalink_url)
       .map(pl => {
         let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
         if (cover) cover = cover.replace('large', 't500x500');
@@ -464,63 +464,33 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг (Двойная защита: Перемотка или Запасной метод)
+// 12. Стриминг (С поддержкой перемотки через scdl.stream)
 router.get('/stream', async (req, res) => {
+  const trackUrl = req.query.url;
+  if (!trackUrl) return res.status(400).send('URL required');
+
   try {
-    const trackUrl = req.query.url;
-    if (!trackUrl) throw new Error('Ссылка не передана');
-
-    // Попытка 1: Пытаемся получить прямой URL для поддержки перемотки (Range)
-    try {
-      const info = await scdl.getInfo(trackUrl);
-      let streamUrl = null;
-
-      if (info.media && info.media.transcodings) {
-        const progressive = info.media.transcodings.find(t => t.format.protocol === 'progressive');
-        if (progressive) {
-          if (!scdl.client_id) {
-            await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
-          }
-          const transUrl = `${progressive.url}?client_id=${scdl.client_id}`;
-          const transRes = await axios.get(transUrl);
-          streamUrl = transRes.data.url;
-        }
-      } else if (info.stream_url) {
-         streamUrl = info.stream_url;
-      }
-
-      if (streamUrl) {
-        const range = req.headers.range;
-        const headers = {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Referer': 'https://soundcloud.com/',
-          'Origin': 'https://soundcloud.com'
-        };
-        if (range) headers['Range'] = range;
-
-        const response = await axios.get(streamUrl, { headers, responseType: 'stream' });
-        
-        res.status(response.status);
-        if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
-        if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
-        if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-        res.setHeader('Content-Type', 'audio/mpeg');
-
-        return response.data.pipe(res);
-      }
-    } catch (e) {
-      console.log('Прямой стриминг не удался, переключаемся на scdl.download:', e.message);
-    }
-
-    // Попытка 2: Запасной вариант (гарантированно играет, но может сбрасывать ползунок)
-    console.log('Используем запасной метод scdl.download');
-    const stream = await scdl.download(trackUrl);
+    // scdl.stream сам обрабатывает заголовки и запрашивает нужный кусок (Range)
+    const stream = await scdl.stream(trackUrl);
+    
     res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    
     stream.pipe(res);
-
   } catch (err) {
     console.error('Ошибка стриминга:', err.message);
-    if (!res.headersSent) res.status(500).send('Ошибка стриминга');
+    
+    // Если scdl.stream упал, пробуем обычный download (без перемотки, но играет)
+    try {
+        console.log('Стриминг через scdl.stream упал, пробуем scdl.download');
+        const dlStream = await scdl.download(trackUrl);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        dlStream.pipe(res);
+    } catch(e) {
+        console.error('Все методы стриминга упали:', e.message);
+        if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
+    }
   }
 });
 
