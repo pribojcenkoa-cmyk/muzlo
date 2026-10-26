@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
     ]);
 
     const albums = playlistsRes.collection
-      .filter(pl => pl.permalink_url) // Защита от битых ссылок
+      .filter(pl => pl.permalink_url)
       .map(pl => {
         let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
         if (cover) cover = cover.replace('large', 't500x500');
@@ -103,33 +103,26 @@ router.get('/album', async (req, res) => {
     if (!albumUrl || albumUrl === 'undefined') return res.status(400).json({ error: 'URL не передан' });
     albumUrl = albumUrl.split('?')[0];
 
-    // Попытка 1: Стандартный метод scdl
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
       if (playlist && playlist.tracks && playlist.tracks.length > 0) {
         const validTracks = playlist.tracks.filter(t => t && t.permalink_url).map(track => formatTrack(track)).filter(Boolean);
-        if (validTracks.length > 0) {
-          return res.json({ tracks: validTracks });
-        }
+        if (validTracks.length > 0) return res.json({ tracks: validTracks });
       }
     } catch (e) {}
 
-    // Попытка 2: Jina AI HTML
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' }, timeout: 15000 });
       let html = jinaRes.data;
-      
       if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
           const startStr = 'window.__sc_hydration = ';
           const startIndex = html.indexOf(startStr);
           const endIndex = html.indexOf('</script>', startIndex);
           let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
           if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
-
           const hydration = JSON.parse(jsonStr);
           const playlistData = hydration.find(item => item.hydratable === 'playlist' || item.hydratable === 'playlistInfo');
-          
           if (playlistData && playlistData.data) {
               const tracksData = playlistData.data.tracks || (playlistData.data.playlist && playlistData.data.playlist.tracks);
               if (tracksData) {
@@ -140,12 +133,10 @@ router.get('/album', async (req, res) => {
       }
     } catch (e) {}
 
-    // Попытка 3: Jina AI Text
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 15000 });
       const text = jinaRes.data;
-      
       const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
       const trackUrls = [...new Set(urlMatches)].filter(u => {
         const p = u.replace('https://soundcloud.com/', '').split('/');
@@ -464,63 +455,90 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг (Исправлена перемотка с помощью Accept-Encoding: identity)
+// 12. Стриминг (ИСПОЛЬЗУЕМ ВНЕШНИЕ ПРОКСИ ДЛЯ ОБХОДА IP)
 router.get('/stream', async (req, res) => {
   const trackUrl = req.query.url;
   if (!trackUrl) return res.status(400).send('URL required');
 
+  // Функция для запасного метода
+  const fallbackToScdl = async () => {
+    try {
+      console.log('Переключение на запасной метод scdl.download');
+      const stream = await scdl.download(trackUrl);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      stream.pipe(res);
+    } catch (e) {
+      console.error('Запасной метод тоже упал:', e.message);
+      if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
+    }
+  };
+
   try {
     // 1. Получаем информацию о треке
-    const info = await scdl.getInfo(trackUrl);
-    let streamUrl = null;
+    let info;
+    try {
+      info = await scdl.getInfo(trackUrl);
+    } catch (e) {
+      return fallbackToScdl();
+    }
 
-    // 2. Ищем прямой mp3 поток (progressive)
+    let directUrl = null;
+    // Ищем прямой mp3 поток (progressive)
     if (info.media && info.media.transcodings) {
       const progressive = info.media.transcodings.find(t => t.format.protocol === 'progressive');
       if (progressive) {
-        if (!scdl.client_id) {
-          await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
-        }
+        if (!scdl.client_id) await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 });
         const transUrl = `${progressive.url}?client_id=${scdl.client_id}`;
         const transRes = await axios.get(transUrl);
-        streamUrl = transRes.data.url; // Прямая ссылка на CDN
+        directUrl = transRes.data.url;
       }
     }
 
-    if (streamUrl) {
+    if (!directUrl) return fallbackToScdl();
+
+    // 2. Пытаемся стримить напрямую с Range (вдруг Render пропустит)
+    try {
       const range = req.headers.range;
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://soundcloud.com/',
         'Origin': 'https://soundcloud.com',
         'Accept': '*/*',
-        'Accept-Encoding': 'identity' // КРИТИЧЕСКИ ВАЖНО для перемотки!
+        'Accept-Encoding': 'identity'
       };
       if (range) headers['Range'] = range;
 
-      const response = await axios.get(streamUrl, { headers, responseType: 'stream' });
-
-      res.status(response.status);
-      if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
-      if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-      return response.data.pipe(res);
+      const response = await axios.get(directUrl, { headers, responseType: 'stream', timeout: 10000 });
+      
+      if (response.status === 206 || response.status === 200) {
+        res.status(response.status);
+        if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+        if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'audio/mpeg');
+        return response.data.pipe(res);
+      }
+    } catch (directErr) {
+      console.log('Прямой стриминг упал (IP заблокирован), переключаемся на прокси...');
     }
-  } catch (err) {
-    console.log('Ошибка прямого стриминга, переключаемся на fallback:', err.message);
-  }
 
-  // 3. Запасной вариант (без перемотки, но гарантированно играет)
-  try {
-    const stream = await scdl.download(trackUrl);
-    res.setHeader('Content-Type', 'audio/mpeg');
-    stream.pipe(res);
+    // 3. Если IP заблокирован, используем прокси allorigins
+    try {
+      console.log('Стриминг через api.allorigins.win...');
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
+      const proxyRes = await axios.get(proxyUrl, { responseType: 'stream', timeout: 20000 });
+      
+      res.setHeader('Content-Type', 'audio/mpeg');
+      // Важно: allorigins отдает файл целиком, поэтому ползунок будет работать только после полной загрузки
+      return proxyRes.data.pipe(res);
+    } catch (proxyErr) {
+      console.log('Прокси allorigins не справился:', proxyErr.message);
+      return fallbackToScdl();
+    }
+
   } catch (err) {
-    console.error('Ошибка стриминга:', err.message);
-    if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
+    console.error('Критическая ошибка стриминга:', err.message);
+    return fallbackToScdl();
   }
 });
 
