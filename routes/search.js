@@ -66,25 +66,26 @@ router.get('/', async (req, res) => {
   const q = req.query.q;
   if (!q) return res.json({ tracks: [], albums: [] });
   try {
-    // Ищем параллельно треки и плейлисты
     const [tracks, playlistsRes] = await Promise.all([
       searchSoundCloud(q).catch(() => []),
       scdl.search({ query: q, resourceType: 'playlists', limit: 20 }).catch(() => ({ collection: [] }))
     ]);
 
-    const albums = playlistsRes.collection.map(pl => {
-      let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
-      if (cover) cover = cover.replace('large', 't500x500');
-      return {
-        id: pl.id,
-        title: pl.title,
-        artist_name: pl.user ? pl.user.username : 'Неизвестен',
-        cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-        track_count: pl.track_count,
-        permalink_url: pl.permalink_url,
-        is_album: true
-      };
-    });
+    const albums = playlistsRes.collection
+      .filter(pl => pl.permalink_url) // Защита от битых ссылок
+      .map(pl => {
+        let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
+        if (cover) cover = cover.replace('large', 't500x500');
+        return {
+          id: pl.id,
+          title: pl.title,
+          artist_name: pl.user ? pl.user.username : 'Неизвестен',
+          cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
+          track_count: pl.track_count,
+          permalink_url: pl.permalink_url,
+          is_album: true
+        };
+      });
 
     res.json({ tracks, albums });
   } catch (err) {
@@ -92,17 +93,53 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2.1. Загрузка треков конкретного альбома
+// 2.1. Загрузка треков конкретного альбома (Устойчивый метод)
 router.get('/album', async (req, res) => {
   try {
-    const albumUrl = req.query.url;
+    let albumUrl = req.query.url;
     if (!albumUrl) return res.status(400).json({ error: 'URL не передан' });
+
+    // Очищаем ссылку от параметров
+    albumUrl = albumUrl.split('?')[0];
+
+    console.log(`[SoundCloud Album] Загрузка: ${albumUrl}`);
+
+    // Попытка 1: Стандартный метод scdl
+    try {
+      const playlist = await scdl.getSetInfo(albumUrl);
+      if (playlist && playlist.tracks) {
+        const tracks = playlist.tracks.map(track => formatTrack(track));
+        return res.json({ tracks });
+      }
+    } catch (e) {
+      console.log(`[SoundCloud Album] scdl.getSetInfo не сработал: ${e.message}`);
+    }
+
+    // Попытка 2: Через API v2
+    if (!scdl.client_id) {
+      await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
+    }
+    const clientId = scdl.client_id;
     
-    const playlist = await scdl.getSetInfo(albumUrl);
-    const tracks = playlist.tracks.map(track => formatTrack(track));
-    res.json({ tracks });
+    if (clientId) {
+      const resolveRes = await axios.get(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(albumUrl)}&client_id=${clientId}`);
+      if (resolveRes.data && resolveRes.data.id) {
+        const playlistId = resolveRes.data.id;
+        const playlistRes = await axios.get(`https://api-v2.soundcloud.com/playlists/${playlistId}?client_id=${clientId}`);
+        
+        if (playlistRes.data && playlistRes.data.tracks) {
+          const tracks = playlistRes.data.tracks
+            .filter(t => t && t.duration) // Фильтруем удаленные треки
+            .map(track => formatTrack(track));
+          return res.json({ tracks });
+        }
+      }
+    }
+
+    throw new Error('Все методы исчерпаны');
   } catch (err) {
-    res.status(500).json({ error: 'Ошибка загрузки альбома' });
+    console.error('[SoundCloud Album] Ошибка:', err.message);
+    res.status(500).json({ error: 'Ошибка загрузки альбома. Возможно, он скрыт или удален.' });
   }
 });
 
