@@ -26,7 +26,7 @@ async function searchSoundCloud(q, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000)
+    .filter(track => track.duration < 900000) // Только до 15 минут
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
@@ -74,7 +74,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 3. Инфо
+// 3. Инфо (длительность)
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -103,7 +103,7 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна
+// 5. Моя волна (Умная)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
@@ -157,7 +157,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
   }
 });
 
-// 6. История
+// 6. История прослушиваний
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
@@ -173,7 +173,7 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// 7. Статистика
+// 7. Статистика профиля
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const totalTime = await query(
@@ -205,28 +205,46 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. Импорт из SoundCloud (Лайки профиля ИЛИ Плейлист)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Исправлена поддержка коротких ссылок и плейлистов)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
+  // Очищаем ссылку от параметров и слэшей
   url = url.split('?')[0].replace(/\/$/, '');
   
   try {
+    // Если ссылка короткая (on.soundcloud.com), пробуем её расшифровать
+    if (url.includes('on.soundcloud.com')) {
+      console.log('[SoundCloud] Расшифровываем короткую ссылку:', url);
+      try {
+        const redirectRes = await axios.get(url, { maxRedirects: 0, validateStatus: () => true });
+        if (redirectRes.headers.location) {
+          url = redirectRes.headers.location.split('?')[0].replace(/\/$/, '');
+          console.log('[SoundCloud] Перенаправление на:', url);
+        }
+      } catch (e) {
+        console.log('[SoundCloud] Не удалось расшифровать:', e.message);
+      }
+    }
+
     let result;
     
+    // Если в ссылке есть /sets/ — это плейлист (альбом)
     if (url.includes('/sets/')) {
       console.log('[SoundCloud] Загружаем плейлист:', url);
       const playlist = await scdl.getPlaylist(url);
       result = { collection: playlist.tracks };
-    } else {
+    } 
+    // Иначе считаем, что это профиль — грузим лайки
+    else {
       console.log('[SoundCloud] Загружаем лайки профиля:', url);
       const likesUrl = `${url}/likes`;
       result = await scdl.getTracks({ url: likesUrl, limit: 100 });
     }
     
     if (!result.collection || result.collection.length === 0) {
-      return res.json({ tracks: [], message: 'Треки не найдены' });
+      return res.json({ tracks: [], message: 'Треки не найдены (профиль закрыт или плейлист пуст)' });
     }
 
     const tracks = result.collection
@@ -249,11 +267,11 @@ router.get('/import-likes', async (req, res) => {
     res.json({ tracks });
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err);
-    res.status(500).json({ error: 'Ошибка импорта. Проверьте, что ссылка открыта для всех.' }); 
+    res.status(500).json({ error: 'Ошибка импорта. Проверьте, что профиль/плейлист открыт для всех.' }); 
   }
 });
 
-// 9. Импорт из Яндекс.Музыки (через прокси/API)
+// 9. ИМПОРТ ИЗ ЯНДЕКС.МУЗЫКИ (через прокси/API)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) {
@@ -308,7 +326,7 @@ router.get('/import-yandex', async (req, res) => {
   }
 
   if (parsedTracks.length === 0) {
-    return res.status(404).json({ error: 'Яндекс блокирует все прокси. Попробуйте SoundCloud.' });
+    return res.status(404).json({ error: 'Яндекс блокирует все прокси. Пожалуйста, используйте SoundCloud.' });
   }
 
   const tracks = [];
@@ -328,7 +346,7 @@ router.get('/import-yandex', async (req, res) => {
   res.json({ tracks });
 });
 
-// 10. Импорт из ТЕКСТА
+// 10. ИМПОРТ ИЗ ТЕКСТА (Список треков)
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
   if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список треков' });
@@ -362,7 +380,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг аудио
+// 12. Стриминг
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
