@@ -206,7 +206,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Гибридный метод: API -> Jina HTML -> Jina Text)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Твой старый стабильный код)
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -238,121 +238,60 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks: [formatTrack(info)] });
     }
 
-    // ПРОФИЛЬ (Лайки)
+    // ПРОФИЛЬ (Лайки) - Экстракция ссылок через Jina AI
     const username = parts[0];
-    console.log(`[SoundCloud Import] Начинаем импорт лайков для: ${username}`);
+    console.log(`[SoundCloud Import] Запуск извлечения лайков для: ${username}`);
     
     let tracks = [];
-    let success = false;
-
-    // --- СПОСОБ 1: API v2 (Самый быстрый и надежный, достает все сразу) ---
+    
     try {
-      if (!scdl.client_id) {
-        await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
-      }
-      const clientId = scdl.client_id;
-      if (clientId) {
-        console.log(`[SoundCloud Import] Способ 1: API v2 (Client ID: ${clientId.substring(0, 5)}...)`);
-        const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=https://soundcloud.com/${username}&client_id=${clientId}`;
-        
-        const userRes = await axios.get(`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(resolveUrl)}`, { timeout: 10000 });
-        
-        if (userRes.data && userRes.data.id) {
-          const likesUrl = `https://api-v2.soundcloud.com/users/${userRes.data.id}/likes?client_id=${clientId}&limit=100`;
-          const likesRes = await axios.get(`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(likesUrl)}`, { timeout: 10000 });
-          
-          if (likesRes.data && likesRes.data.collection) {
-            const rawTracks = likesRes.data.collection.map(item => item.track || item).filter(Boolean);
-            tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => formatTrack(track));
-            if (tracks.length > 0) {
-              success = true;
-              console.log(`[SoundCloud Import] Способ 1 успешно вернул ${tracks.length} треков`);
-            }
+      // 1. Запрашиваем страницу лайков через Jina AI
+      const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
+      console.log(`[SoundCloud Import] Запрос к Jina AI...`);
+      
+      const jinaRes = await axios.get(jinaUrl, { 
+        headers: { 'Accept': 'text/plain' }, 
+        timeout: 20000 
+      });
+      
+      const text = jinaRes.data;
+      
+      // 2. Ищем все ссылки на треки в тексте
+      const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
+      
+      // 3. Очищаем от дублей и отсеиваем системные страницы
+      const trackUrls = [...new Set(urlMatches)].filter(u => {
+        const p = u.replace('https://soundcloud.com/', '').split('/');
+        return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
+      });
+      
+      console.log(`[SoundCloud Import] Jina AI нашел ${trackUrls.length} ссылок на треки`);
+
+      if (trackUrls.length > 0) {
+        // 4. Получаем информацию о каждом треке
+        for (const trackUrl of trackUrls.slice(0, 40)) {
+          try {
+            const info = await scdl.getInfo(trackUrl);
+            tracks.push(formatTrack(info));
+          } catch (e) {
+            // Пропускаем битые треки
           }
         }
       }
-    } catch (e) {
-      console.log(`[SoundCloud Import] Способ 1 (API) не сработал: ${e.message}`);
+    } catch (jinaErr) {
+      console.log(`[SoundCloud Import] Ошибка Jina AI: ${jinaErr.message}`);
     }
 
-    // --- СПОСОБ 2: Jina AI HTML (Если API заблокирован, парсим HTML страницы) ---
-    if (!success) {
-      try {
-        console.log(`[SoundCloud Import] Способ 2: Jina AI HTML`);
-        const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
-        const jinaRes = await axios.get(jinaUrl, { 
-          headers: { 
-            'Accept': 'text/html',
-            'X-Return-Format': 'html' 
-          }, 
-          timeout: 20000 
-        });
-        let html = jinaRes.data;
-        
-        if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
-           const startStr = 'window.__sc_hydration = ';
-           const startIndex = html.indexOf(startStr);
-           const endIndex = html.indexOf('</script>', startIndex);
-           let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
-           if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
-
-           const hydration = JSON.parse(jsonStr);
-           const likesData = hydration.find(item => item.hydratable === 'likes');
-           
-           if (likesData && likesData.data && likesData.data.collection) {
-             const rawTracks = likesData.data.collection.map(item => item.track || item).filter(Boolean);
-             tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => formatTrack(track));
-             if (tracks.length > 0) {
-               success = true;
-               console.log(`[SoundCloud Import] Способ 2 успешно вернул ${tracks.length} треков (первая страница)`);
-             }
-           }
-        }
-      } catch (e) {
-        console.log(`[SoundCloud Import] Способ 2 (Jina HTML) не сработал: ${e.message}`);
-      }
-    }
-
-    // --- СПОСОБ 3: Jina AI Text (Твой старый рабочий код, достает первые 10-20) ---
-    if (!success) {
-      try {
-        console.log(`[SoundCloud Import] Способ 3: Jina AI Text (ссылки)`);
-        const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
-        const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
-        const text = jinaRes.data;
-        
-        const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
-        const trackUrls = [...new Set(urlMatches)].filter(u => {
-          const p = u.replace('https://soundcloud.com/', '').split('/');
-          return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
-        });
-
-        if (trackUrls.length > 0) {
-          for (const trackUrl of trackUrls.slice(0, 40)) {
-            try {
-              const info = await scdl.getInfo(trackUrl);
-              tracks.push(formatTrack(info));
-            } catch (e) {}
-          }
-        }
-        if (tracks.length > 0) {
-          success = true;
-          console.log(`[SoundCloud Import] Способ 3 успешно вернул ${tracks.length} треков`);
-        }
-      } catch (e) {
-        console.log(`[SoundCloud Import] Способ 3 (Jina Text) не сработал: ${e.message}`);
-      }
-    }
-
-    if (success && tracks.length > 0) {
+    if (tracks.length > 0) {
+      console.log(`[SoundCloud Import] Успешно импортировано ${tracks.length} треков!`);
       return res.json({ tracks });
     } else {
-      throw new Error('Все методы импорта исчерпаны');
+      throw new Error('Не удалось найти треки (страница пуста или заблокирована)');
     }
 
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    res.status(400).json({ error: 'SoundCloud заблокировал все запросы с сервера. Попробуйте позже или используйте импорт текстом.' }); 
+    res.status(400).json({ error: 'SoundCloud заблокировал запросы. Используйте импорт текстом.' }); 
   }
 });
 
