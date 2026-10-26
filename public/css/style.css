@@ -233,7 +233,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .sidebar {
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: wrap; 
     align-items: center;
     justify-content: space-between;
     padding: 10px 15px;
@@ -245,28 +245,91 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     z-index: 10;
   }
 
-  .logo-wrapper { margin-bottom: 0; padding-left: 0; gap: 8px; }
+  .logo-wrapper { 
+    order: 1;
+    margin-bottom: 0; 
+    padding-left: 0; 
+    gap: 8px; 
+  }
   .logo { font-size: 20px; }
   .discord-icon { width: 22px; height: 22px; margin-left: 4px; }
 
-  .sidebar .auth-container { order: 2; margin-left: auto; margin-bottom: 0; padding-left: 0; width: auto; }
+  /* Блок профиля */
+  .sidebar .auth-container { 
+    order: 2; 
+    margin-left: auto; 
+    margin-bottom: 0; 
+    padding-left: 0; 
+    width: auto;
+    max-width: 60%; 
+  }
+  
   .sidebar .btn-auth { width: auto; padding: 6px 14px; font-size: 13px; border-radius: 20px; }
-  .sidebar .profile-info { padding: 4px 10px; flex-direction: row; gap: 10px; background: none; border: none; }
-  .sidebar .profile-info span { margin-bottom: 0; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sidebar .btn-logout { width: auto; background: none; padding: 0; }
+  
+  .sidebar .profile-info { 
+    padding: 4px 8px; 
+    flex-direction: row; 
+    gap: 8px; 
+    background: none; 
+    border: none; 
+    width: 100%;
+    justify-content: flex-end;
+    overflow: hidden;
+  }
+  
+  .sidebar .profile-info span { 
+    margin-bottom: 0; 
+    max-width: 75px; 
+    font-size: 11px;
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    white-space: nowrap; 
+    flex-shrink: 1;
+  }
+  
+  .sidebar .btn-logout { 
+    width: auto; 
+    background: none; 
+    padding: 0; 
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0; 
+  }
 
   /* --- НАВИГАЦИЯ --- */
-  .sidebar nav { order: 3; width: 100%; margin-top: 5px; }
+  .sidebar nav { 
+    order: 3; 
+    width: 100%; 
+    margin-top: 5px; 
+    position: relative;
+  }
+
+  /* Тень для понимания, что есть скролл */
+  .sidebar nav::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 30px;
+    background: linear-gradient(to right, transparent, #000);
+    pointer-events: none;
+    z-index: 2;
+  }
+
   .sidebar nav ul {
     display: flex;
     flex-direction: row;
     gap: 6px;
-    overflow-x: auto;
-    padding-bottom: 4px;
+    overflow-x: auto; 
+    padding-bottom: 5px;
+    padding-right: 20px;
     scrollbar-width: none;
   }
   .sidebar nav ul::-webkit-scrollbar { display: none; }
+  
   .sidebar nav li {
+    flex-shrink: 0; 
     padding: 6px 14px;
     white-space: nowrap;
     font-size: 13px;
@@ -276,13 +339,14 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   }
   .sidebar nav li.active { background-color: var(--accent); color: #000; font-weight: bold; }
 
+  /* Кнопка Импорта */
   #import-btn {
     order: 4;
-    width: auto;
-    margin: 5px 0 0 8px;
-    padding: 6px 12px;
-    font-size: 12px;
-    border-radius: 20px;
+    width: 100%;
+    margin: 5px 0 0 0;
+    padding: 8px;
+    font-size: 13px;
+    border-radius: 8px;
   }
 
   /* --- КОНТЕНТ --- */
@@ -309,7 +373,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .track-duration { display: none; }
   .btn-like, .btn-delete { font-size: 18px; padding: 0 4px; flex-shrink: 0; }
 
-  /* --- ПЛЕЕР (ВЫЕЗЖАЕТ СНИЗУ) --- */
+  /* --- ПЛЕЕР --- */
   .player {
     position: fixed;
     bottom: 0;
@@ -345,10 +409,10 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .control-btn { font-size: 18px; }
   .play-btn { width: 36px; height: 36px; font-size: 16px; }
 
-  /* ВОЗВРАЩАЕМ ГРОМКОСТЬ НА МОБИЛКЕ */
+  /* ГРОМКОСТЬ НА МОБИЛКЕ */
   .player-volume {
     display: flex;
-    width: 70px;
+    width: 60px;
     justify-content: flex-end;
     gap: 4px;
   }
@@ -356,7 +420,7 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     display: none; 
   }
   .player-volume input {
-    width: 60px; 
+    width: 50px; 
     height: 4px;
   }
 
