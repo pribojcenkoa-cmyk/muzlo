@@ -101,25 +101,19 @@ router.get('/album', async (req, res) => {
     if (!albumUrl || albumUrl === 'undefined') return res.status(400).json({ error: 'URL не передан' });
     albumUrl = albumUrl.split('?')[0];
 
-    console.log(`[SoundCloud Album] Загрузка: ${albumUrl}`);
-
-    // Попытка 1: Стандартный метод scdl
+    // Попытка 1: Стандартный метод
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
       if (playlist && playlist.tracks && playlist.tracks.length > 0) {
         const validTracks = playlist.tracks.filter(t => t && t.permalink_url).map(track => formatTrack(track)).filter(Boolean);
         if (validTracks.length > 0) {
-          console.log(`[SoundCloud Album] Способ 1 (scdl) успешно. Треков: ${validTracks.length}`);
           return res.json({ tracks: validTracks });
         }
       }
-    } catch (e) {
-      console.log(`[SoundCloud Album] Способ 1 (scdl) упал: ${e.message}`);
-    }
+    } catch (e) {}
 
-    // Попытка 2: Jina AI (Text)
+    // Попытка 2: Jina AI
     try {
-      console.log(`[SoundCloud Album] Пробуем Jina AI (Text)...`);
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
       const text = jinaRes.data;
@@ -139,19 +133,13 @@ router.get('/album', async (req, res) => {
             if (formatted) tracks.push(formatted);
           } catch (e) {}
         }
-        if (tracks.length > 0) {
-          console.log(`[SoundCloud Album] Успешно загружено ${tracks.length} треков`);
-          return res.json({ tracks });
-        }
+        if (tracks.length > 0) return res.json({ tracks });
       }
-    } catch (e) {
-      console.log(`[SoundCloud Album] Способ 2 (Jina Text) упал: ${e.message}`);
-    }
+    } catch (e) {}
 
     throw new Error('Не удалось найти треки в альбоме');
   } catch (err) {
-    console.error('[SoundCloud Album] Ошибка:', err.message);
-    res.status(500).json({ error: 'Ошибка загрузки альбома. Сервер заблокирован SoundCloud.' });
+    res.status(500).json({ error: 'Ошибка загрузки альбома.' });
   }
 });
 
@@ -319,19 +307,11 @@ router.get('/import-likes', async (req, res) => {
     }
 
     const username = parts[0];
-    console.log(`[SoundCloud Import] Запуск извлечения лайков для: ${username}`);
-    
     let tracks = [];
     
     try {
       const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
-      console.log(`[SoundCloud Import] Запрос к Jina AI...`);
-      
-      const jinaRes = await axios.get(jinaUrl, { 
-        headers: { 'Accept': 'text/plain' }, 
-        timeout: 20000 
-      });
-      
+      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
       const text = jinaRes.data;
       const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
       
@@ -339,8 +319,6 @@ router.get('/import-likes', async (req, res) => {
         const p = u.replace('https://soundcloud.com/', '').split('/');
         return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
       });
-      
-      console.log(`[SoundCloud Import] Jina AI нашел ${trackUrls.length} ссылок на треки`);
 
       if (trackUrls.length > 0) {
         for (const trackUrl of trackUrls.slice(0, 40)) {
@@ -350,19 +328,15 @@ router.get('/import-likes', async (req, res) => {
           } catch (e) {}
         }
       }
-    } catch (jinaErr) {
-      console.log(`[SoundCloud Import] Ошибка Jina AI: ${jinaErr.message}`);
-    }
+    } catch (jinaErr) {}
 
     if (tracks.length > 0) {
-      console.log(`[SoundCloud Import] Успешно импортировано ${tracks.length} треков!`);
       return res.json({ tracks });
     } else {
-      throw new Error('Не удалось найти треки (страница пуста или заблокирована)');
+      throw new Error('Не удалось найти треки');
     }
 
   } catch (err) { 
-    console.error('Ошибка импорта SoundCloud:', err.message);
     res.status(400).json({ error: 'SoundCloud заблокировал запросы. Используйте импорт текстом.' }); 
   }
 });
@@ -462,15 +436,38 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг
+// 12. Стриминг (ИСПРАВЛЕНА ПЕРЕМОТКА)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
-    const stream = await scdl.download(trackUrl);
+
+    const info = await scdl.getInfo(trackUrl);
+    
+    let streamUrl = info.stream_url; 
+    if (info.formats) {
+      const mp3Format = info.formats.find(f => f.preset && f.preset.includes('mp3'));
+      if (mp3Format) streamUrl = mp3Format.url;
+    }
+
+    if (!streamUrl) throw new Error('Не удалось получить ссылку на поток');
+
+    const range = req.headers.range;
+    const headers = { 'User-Agent': 'Mozilla/5.0' };
+    if (range) headers['Range'] = range;
+
+    const response = await axios.get(streamUrl, { headers, responseType: 'stream' });
+
+    res.status(response.status);
+    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
     res.setHeader('Content-Type', 'audio/mpeg');
-    stream.pipe(res);
-  } catch (err) { if (!res.headersSent) res.status(500).send('Ошибка стриминга'); }
+
+    response.data.pipe(res);
+  } catch (err) {
+    if (!res.headersSent) res.status(500).send('Ошибка стриминга');
+  }
 });
 
 export default router;
