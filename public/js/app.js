@@ -1,1 +1,1019 @@
-const t=document.getElementById("audio-player"),e=document.getElementById("track-list"),n=document.getElementById("page-title"),o=document.getElementById("search-container"),a=document.getElementById("search-input"),r=document.getElementById("nav-home"),i=document.getElementById("nav-search"),l=document.getElementById("nav-library"),s=document.getElementById("nav-wave"),c=document.getElementById("nav-profile"),d=document.getElementById("profile-stats"),u=document.getElementById("admin-widget"),m=document.getElementById("btn-play"),p=document.getElementById("btn-next"),y=document.getElementById("btn-prev"),g=document.getElementById("player-title"),b=document.getElementById("player-artist"),h=document.getElementById("player-cover"),v=document.getElementById("seek-slider"),x=document.getElementById("volume-slider"),f=document.getElementById("volume-label"),k=document.getElementById("current-time"),E=document.getElementById("total-time"),w=document.getElementById("auth-modal"),L=document.getElementById("auth-form"),I=document.getElementById("auth-container"),C=document.getElementById("import-btn"),B=document.getElementById("import-modal"),T=document.getElementById("btn-close-import"),_=document.getElementById("import-url"),S=document.getElementById("import-text"),$=document.getElementById("btn-do-import"),M=document.getElementById("import-status");let H=[],j=-1,O=!1,P=!0,N=0,z=!1,D="",J=new Set,q=null,A=null,R=null,U=null;const K=t=>{if(!t||isNaN(t))return"0:00";const e=Math.floor(t/60),n=Math.floor(t%60);return`${e}:${n<10?"0":""}${n}`};function F(t){return t.stream_url?t.stream_url:t.is_external&&t.file_url?t.file_url:`/api/tracks/${t.id}/stream`}function G(){if(!A)try{A=new(window.AudioContext||window.webkitAudioContext),R=A.createMediaElementSource(t),U=A.createGain(),R.connect(U),U.connect(A.destination)}catch(t){console.error("Web Audio API не поддерживается:",t)}}async function W(t,e={},n=1e4){const o=new AbortController,a=setTimeout(()=>o.abort(),n);try{const n=await fetch(t,{...e,signal:o.signal});return clearTimeout(a),n}catch(t){throw clearTimeout(a),t}}async function Q(){try{const t=await fetch("/api/library");if(t.ok){const e=await t.json();J=new Set(e.tracks.map(t=>String(t.id)))}}catch(t){}}async function V(){try{const t=await fetch("/api/admin/stats");if(!t.ok)return;const e=await t.json(),n=document.getElementById("admin-online"),o=document.getElementById("admin-total"),a=document.getElementById("admin-plays");n&&(n.textContent=e.online),o&&(o.textContent=e.total_users),a&&(a.textContent=e.plays_today);const r=document.getElementById("admin-users-list");if(r&&e.all_users){let t='<table style="width:100%; text-align:left;">';t+='<tr style="color:#1db954;"><th>ID</th><th>Email</th><th>Роль</th></tr>',e.all_users.forEach(e=>{const n="admin"===e.role?"#ff4d4d":"#b3b3b3";t+=`<tr>\n          <td style="padding: 3px 0;">${e.id}</td>\n          <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px;">${e.email}</td>\n          <td style="color: ${n}; font-weight: bold;">${e.role}</td>\n        </tr>`}),t+="</table>",r.innerHTML=t}}catch(t){console.error("Ошибка загрузки админ-статистики:",t)}}async function X(t){if(t&&!(t.length<2)){e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';try{const e=await W(`/api/search?q=${encodeURIComponent(t)}`),n=await e.json();if(!e.ok)throw new Error(n.error);Z(n.tracks)}catch(t){e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска.</p>'}}}function Y(){if(!t.src)return;const e=H[j];e&&(localStorage.setItem("muzlo_current_track",JSON.stringify(e)),localStorage.setItem("muzlo_current_time",t.currentTime),localStorage.setItem("muzlo_volume",x.value))}function Z(n,o=!1){H=n||[],e.innerHTML="",0!==H.length?H.forEach((n,a)=>{const r=document.createElement("div");r.className="track-item",r.dataset.index=a;const i=J.has(String(n.id));let s=o?'<button class="btn-delete" title="Удалить">✕</button>':`<button class="btn-like ${i?"liked":""}" title="Сохранить">${i?"❤":"♥"}</button>`;var c;r.innerHTML=`\n      <img src="${c=n.cover_url,c||"/img/default-cover.png"}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">\n      <div class="track-info">\n        <div class="track-title">${n.title}</div>\n        <div class="track-artist"><span class="artist-link" data-artist="${n.artist_name||"Неизвестен"}">${n.artist_name||"Неизвестен"}</span></div>\n      </div>\n      <div class="track-duration">${K(n.duration)}</div>\n      ${s}\n    `,r.querySelector(".track-cover").onerror=function(){this.onerror=null,this.src="/img/default-cover.png"},r.addEventListener("click",e=>{e.target.classList.contains("btn-like")||e.target.classList.contains("btn-delete")||e.target.classList.contains("artist-link")||(document.querySelectorAll(".track-item").forEach(t=>t.classList.remove("active")),r.classList.add("active"),j=a,function(e){const n=document.querySelector(".player");n&&n.classList.contains("hidden")&&n.classList.remove("hidden");G(),A&&"suspended"===A.state&&A.resume();g.textContent=e.title,b.textContent=e.artist_name||"Неизвестен",e.cover_url?(h.src=e.cover_url,h.classList.remove("hidden")):h.classList.add("hidden");N=e.duration||0,E.textContent=K(N),v.value=0,t.src=F(e),t.play().then(()=>{O=!0,m.textContent="⏸",Y(),fetch("/api/search/history",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({track_id:e.id,title:e.title,artist_name:e.artist_name,duration:e.duration})}).catch(t=>console.log("Не авторизован"))}).catch(t=>{console.error("Ошибка аудио:",t),m.textContent="▶",O=!1}),e.permalink_url&&fetch(`/api/search/info?url=${encodeURIComponent(e.permalink_url)}`).then(t=>t.json()).then(t=>{t.duration&&(N=t.duration,E.textContent=K(t.duration))}).catch(t=>{})}(n))});const d=r.querySelector(".btn-like, .btn-delete");o?d.addEventListener("click",async t=>{if(t.stopPropagation(),confirm("Удалить этот трек?"))try{(await fetch(`/api/library/${n.id}`,{method:"DELETE"})).ok&&(J.delete(String(n.id)),l.click())}catch(t){}}):d.addEventListener("click",async t=>{if(t.stopPropagation(),!d.classList.contains("liked"))try{const t=F(n),e=await fetch("/api/library",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({track_id:String(n.id),title:n.title,artist_name:n.artist_name,cover_url:n.cover_url,duration:n.duration,stream_url:t})});if(401===e.status)return alert("Войдите в аккаунт!"),void w.classList.add("active");e.ok&&(d.classList.add("liked"),d.textContent="❤",J.add(String(n.id)))}catch(t){}}),e.appendChild(r)}):e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ничего не найдено.</p>'}function tt(){const e=parseInt(x.value);f.textContent=e+"%",e<=100?(U&&(U.gain.value=1),t.volume=e/100):(t.volume=1,U&&(U.gain.value=e/100))}function et(t,e,a=!1){[r,i,l,s,c].forEach(t=>t.classList.remove("active")),t&&t.classList.add("active"),n.textContent=e,o.style.display=a?"block":"none",d.style.display="none"}let nt;function ot(t){if(t){I.innerHTML=`\n      <div class="profile-info" style="display: flex; flex-direction: column; gap: 10px;">\n        <span>👤 ${t.email}</span>\n        <button class="btn-logout" id="btn-logout" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer;">Выйти</button>\n        <button id="btn-show-change-password" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Сменить пароль</button>\n        <div id="change-password-form" style="display: none; margin-top: 10px; padding: 10px; background: #282828; border-radius: 8px;">\n          <input type="password" id="old-password" placeholder="Старый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">\n          <input type="password" id="new-password-profile" placeholder="Новый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">\n          <button id="btn-save-new-password" style="width: 100%; padding: 5px; background: #1db954; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">Сохранить</button>\n        </div>\n      </div>\n    `,Q();const e=document.getElementById("btn-show-change-password"),n=document.getElementById("change-password-form");e.addEventListener("click",()=>{n.style.display="none"===n.style.display?"block":"none"}),document.getElementById("btn-save-new-password").addEventListener("click",async()=>{const t=document.getElementById("old-password").value,e=document.getElementById("new-password-profile").value;if(!t||!e)return alert("Заполните оба поля");try{const o=await fetch("/api/auth/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({oldPassword:t,newPassword:e})}),a=await o.json();o.ok?(alert("Пароль успешно изменен!"),n.style.display="none",document.getElementById("old-password").value="",document.getElementById("new-password-profile").value=""):alert(a.error)}catch(t){alert("Ошибка сети")}}),"admin"===t.role&&u&&(u.style.display="block",V(),q&&clearInterval(q),q=setInterval(V,3e4))}else I.innerHTML='<button class="btn-auth" id="btn-open-auth">Войти</button>',J.clear(),u&&(u.style.display="none"),q&&(clearInterval(q),q=null)}document.addEventListener("DOMContentLoaded",()=>{const t=document.getElementById("btn-show-users");t&&t.addEventListener("click",()=>{const t=document.getElementById("admin-users-list");t.style.display="none"===t.style.display?"block":"none"})}),e.addEventListener("click",t=>{t.target.classList.contains("artist-link")&&(t.stopPropagation(),async function(t){if(!t||"Неизвестен"===t)return;[r,i,l,s,c].forEach(t=>t.classList.remove("active")),n.textContent=`Артист: ${t}`,o.style.display="none",d.style.display="none",e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';try{const n=await W(`/api/search/artist?name=${encodeURIComponent(t)}`);Z((await n.json()).tracks);const o='<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад</button>';e.insertAdjacentHTML("afterbegin",o),document.getElementById("btn-back-home").addEventListener("click",()=>r.click())}catch(t){e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>'}}(t.target.dataset.artist))}),m.addEventListener("click",()=>{t.src&&(O?(t.pause(),m.textContent="▶",O=!1,Y()):(t.play(),m.textContent="⏸",O=!0))}),p.addEventListener("click",()=>{0!==H.length&&document.querySelector(`.track-item[data-index="${(j+1)%H.length}"]`)?.click()}),y.addEventListener("click",()=>{0!==H.length&&document.querySelector(`.track-item[data-index="${(j-1+H.length)%H.length}"]`)?.click()}),t.addEventListener("timeupdate",()=>{const e=N||t.duration;e&&!isNaN(e)&&(z||(v.value=t.currentTime/e*100),k.textContent=K(t.currentTime),Math.floor(t.currentTime)%3==0&&Y())}),t.addEventListener("loadedmetadata",()=>{E.textContent=K(N||t.duration)}),v.addEventListener("input",()=>{z=!0;const e=N||t.duration;e&&(k.textContent=K(v.value/100*e))}),v.addEventListener("change",()=>{z=!1;const e=N||t.duration;e&&(t.currentTime=v.value/100*e,Y())}),x.addEventListener("input",tt),t.addEventListener("ended",()=>{localStorage.removeItem("muzlo_current_track"),localStorage.removeItem("muzlo_current_time"),p.click()}),window.addEventListener("beforeunload",Y),r.addEventListener("click",async()=>{et(r,"Рекомендации"),e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>',await Q();try{const t=await W("/api/search/trending");Z((await t.json()).tracks)}catch(t){e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает.</p>'}}),s.addEventListener("click",async()=>{et(s,"Моя волна"),e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Слушаем ваши вкусы...</p>',await Q();try{const t=await fetch("/api/search/my-wave");if(401===t.status)return void(e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>');const n=await t.json();if(n.error)return void(e.innerHTML=`<p style="color:red; text-align:center; margin-top:40px;">${n.error}</p>`);Z(n.tracks)}catch(t){e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки волны.</p>'}}),c.addEventListener("click",async()=>{et(c,"Мой профиль"),e.innerHTML="",d.style.display="block",d.innerHTML='<p style="text-align:center;">Загрузка статистики...</p>';try{const t=await fetch("/api/search/stats");if(401===t.status)return void(d.innerHTML='<p style="color:red; text-align:center;">Войдите в аккаунт, чтобы увидеть статистику.</p>');const e=await t.json(),n=Math.floor(e.total_seconds/3600),o=Math.floor(e.total_seconds%3600/60);d.innerHTML=`\n      <h2 style="margin-bottom: 20px;">Статистика прослушиваний</h2>\n      <p style="font-size: 18px; margin-bottom: 20px;">Всего прослушано: <strong style="color:#1db954;">${n} ч ${o} мин</strong></p>\n\n      <h3 style="margin-bottom: 10px;">Топ артистов:</h3>\n      <ul style="list-style: none; padding: 0; margin-bottom: 20px;">\n        ${e.top_artists.map(t=>`<li style="padding: 5px 0; border-bottom: 1px solid #333;">${t.artist_name} — <span style="color:#b3b3b3;">${t.count} раз</span></li>`).join("")||"<li>Нет данных</li>"}\n      </ul>\n\n      <h3 style="margin-bottom: 10px;">Топ треков:</h3>\n      <ul style="list-style: none; padding: 0;">\n        ${e.top_tracks.map(t=>`<li style="padding: 5px 0; border-bottom: 1px solid #333;">${t.title} — <span style="color:#b3b3b3;">${t.artist_name} (${t.count} раз)</span></li>`).join("")||"<li>Нет данных</li>"}\n      </ul>\n    `}catch(t){d.innerHTML='<p style="color:red; text-align:center;">Ошибка загрузки статистики.</p>'}}),i.addEventListener("click",async()=>{et(i,"Поиск по миру",!0),a.focus(),await Q(),D?(a.value=D,X(D)):e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите название...</p>'}),a.addEventListener("input",t=>{clearTimeout(nt);const n=t.target.value.trim();D=n,n.length<2?e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>':(e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>',nt=setTimeout(()=>X(n),600))}),l.addEventListener("click",async()=>{et(l,"Моя медиатека"),e.innerHTML='<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';try{const t=await W("/api/library");if(401===t.status)return void(e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>');Z((await t.json()).tracks,!0)}catch(t){e.innerHTML='<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>'}}),I.addEventListener("click",t=>{"btn-open-auth"===t.target.id&&w.classList.add("active"),"btn-logout"===t.target.id&&async function(){await fetch("/api/auth/logout",{method:"POST"}),ot(null),r.click()}()}),document.getElementById("btn-close-auth").addEventListener("click",()=>w.classList.remove("active")),document.getElementById("btn-toggle-auth").addEventListener("click",t=>{t.preventDefault(),P=!P,document.getElementById("modal-title").textContent=P?"Вход":"Регистрация",document.getElementById("btn-submit-auth").textContent=P?"Войти":"Зарегистрироваться",document.getElementById("auth-toggle-text").textContent=P?"Нет аккаунта?":"Уже есть аккаунт?",document.getElementById("btn-toggle-auth").textContent=P?"Зарегистрироваться":"Войти"}),L.addEventListener("submit",async t=>{t.preventDefault();const e=document.getElementById("auth-email").value,n=document.getElementById("auth-password").value,o=P?"/api/auth/login":"/api/auth/register";try{const t=await fetch(o,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:e,password:n})}),a=await t.json();if(!t.ok)throw new Error(a.error||"Ошибка");w.classList.remove("active"),ot(a.user),L.reset(),l.classList.contains("active")&&l.click()}catch(t){alert(t.message)}});const at=document.getElementById("btn-forgot-password"),rt=document.getElementById("reset-password-block"),it=document.getElementById("btn-back-to-login"),lt=document.getElementById("btn-send-code"),st=document.getElementById("reset-step-2"),ct=document.getElementById("btn-confirm-reset");at&&(at.addEventListener("click",t=>{t.preventDefault(),L.style.display="none",rt.style.display="block"}),it.addEventListener("click",t=>{t.preventDefault(),L.style.display="block",rt.style.display="none",st.style.display="none",lt.style.display="block",lt.textContent="Получить код"}),lt.addEventListener("click",async()=>{const t=document.getElementById("reset-email").value;if(!t)return alert("Введите почту");lt.textContent="Отправка...";try{const e=await fetch("/api/auth/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:t})}),n=await e.json();e.ok?(alert("Код отправлен на почту! Проверьте папку Спам."),st.style.display="block",lt.style.display="none"):(alert(n.error),lt.textContent="Получить код")}catch(t){alert("Ошибка сети"),lt.textContent="Получить код"}}),ct.addEventListener("click",async()=>{const t=document.getElementById("reset-email").value,e=document.getElementById("reset-code").value,n=document.getElementById("reset-new-password").value;try{const o=await fetch("/api/auth/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:t,code:e,newPassword:n})}),a=await o.json();o.ok?(alert("Пароль успешно изменен! Войдите с новым паролем."),L.style.display="block",rt.style.display="none",st.style.display="none",lt.style.display="block",lt.textContent="Получить код",L.reset()):alert(a.error)}catch(t){alert("Ошибка сети")}})),C&&C.addEventListener("click",()=>{B.classList.add("active"),M.textContent="",_.value="",S.value=""}),T.addEventListener("click",()=>B.classList.remove("active")),B.addEventListener("click",t=>{t.target===B&&B.classList.remove("active")}),$.addEventListener("click",async()=>{const t=_.value.trim(),e=S.value.trim();if(e){M.style.color="#1db954",M.textContent="Ищем треки в SoundCloud...",$.disabled=!0;try{const t=await fetch("/api/search/import-text",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:e})}),n=await t.json();n.tracks&&n.tracks.length>0?(M.textContent=`Успех! Найдено треков: ${n.tracks.length}`,setTimeout(()=>{B.classList.remove("active"),et(i,"Импортированные треки",!1),Z(n.tracks),$.disabled=!1,S.value=""},1500)):(M.style.color="#ff4d4d",M.textContent=n.error||"Ничего не найдено.",$.disabled=!1)}catch(t){M.style.color="#ff4d4d",M.textContent="Ошибка соединения.",$.disabled=!1}return}if(!t)return M.style.color="#ff4d4d",void(M.textContent="Введите ссылку или вставьте список треков");let n=t;n.includes("?")&&(n=n.split("?")[0]);let o="";if(n.includes("soundcloud.com"))o=`/api/search/import-likes?url=${encodeURIComponent(n)}`;else{if(!n.includes("music.yandex.ru"))return M.style.color="#ff4d4d",void(M.textContent="Вставьте ссылку SoundCloud/Яндекс или список треков");o=`/api/search/import-yandex?url=${encodeURIComponent(n)}`}M.style.color="#1db954",M.textContent="Загрузка... Пожалуйста, подождите.",$.disabled=!0;try{const t=await fetch(o),e=await t.json();e.tracks&&e.tracks.length>0?(M.textContent=`Успех! Найдено треков: ${e.tracks.length}`,setTimeout(()=>{B.classList.remove("active"),et(i,"Импортированные треки",!1),Z(e.tracks),$.disabled=!1},1500)):(M.style.color="#ff4d4d",M.textContent=e.error||"Треки не найдены.",$.disabled=!1)}catch(t){M.style.color="#ff4d4d",M.textContent="Ошибка соединения.",$.disabled=!1}}),G(),async function(){const e=localStorage.getItem("muzlo_current_track"),n=parseFloat(localStorage.getItem("muzlo_current_time")||0),o=localStorage.getItem("muzlo_volume");if(o&&(x.value=o,tt()),e)try{const o=JSON.parse(e);document.querySelector(".player")?.classList.remove("hidden"),g.textContent=o.title,b.textContent=o.artist_name||"Неизвестен",o.cover_url?(h.src=o.cover_url,h.classList.remove("hidden")):h.classList.add("hidden"),N=o.duration||0,E.textContent=K(N),t.src=F(o),O=!1,m.textContent="▶",t.addEventListener("loadedmetadata",()=>{n>0&&n<t.duration&&(t.currentTime=n,k.textContent=K(n))},{once:!0})}catch(t){}}(),async function(){try{const t=await fetch("/api/auth/me");if(t.ok){ot((await t.json()).user)}}catch(t){}}(),r.click(),document.addEventListener("contextmenu",t=>t.preventDefault()),document.addEventListener("keydown",function(t){return 123===t.keyCode||t.ctrlKey&&t.shiftKey&&(73===t.keyCode||74===t.keyCode)||t.ctrlKey&&85===t.keyCode?(t.preventDefault(),!1):void 0});
+// 1. ИНИЦИАЛИЗАЦИЯ
+const audioPlayer = document.getElementById('audio-player');
+const trackListEl = document.getElementById('track-list');
+const pageTitle = document.getElementById('page-title');
+const searchContainer = document.getElementById('search-container');
+const searchInput = document.getElementById('search-input');
+const navHome = document.getElementById('nav-home');
+const navSearch = document.getElementById('nav-search');
+const navLibrary = document.getElementById('nav-library');
+const navWave = document.getElementById('nav-wave');
+const navProfile = document.getElementById('nav-profile');
+const profileStats = document.getElementById('profile-stats');
+const adminWidget = document.getElementById('admin-widget');
+const btnPlay = document.getElementById('btn-play');
+const btnNext = document.getElementById('btn-next');
+const btnPrev = document.getElementById('btn-prev');
+const playerTitle = document.getElementById('player-title');
+const playerArtist = document.getElementById('player-artist');
+const playerCover = document.getElementById('player-cover');
+const seekSlider = document.getElementById('seek-slider');
+const volumeSlider = document.getElementById('volume-slider');
+const volumeLabel = document.getElementById('volume-label');
+const currentTimeEl = document.getElementById('current-time');
+const totalTimeEl = document.getElementById('total-time');
+const authModal = document.getElementById('auth-modal');
+const authForm = document.getElementById('auth-form');
+const authContainer = document.getElementById('auth-container');
+
+const importBtn = document.getElementById('import-btn');
+const importModal = document.getElementById('import-modal');
+const btnCloseImport = document.getElementById('btn-close-import');
+const importUrlInput = document.getElementById('import-url');
+const importTextInput = document.getElementById('import-text');
+const btnDoImport = document.getElementById('btn-do-import');
+const importStatus = document.getElementById('import-status');
+
+let currentTracks = [];
+let currentTrackIndex = -1;
+let isPlaying = false;
+let isLoginMode = true;
+let currentTrackRealDuration = 0;
+let isSeeking = false;
+let lastSearchQuery = '';
+let userLikedTrackIds = new Set();
+let adminInterval = null;
+
+// Web Audio API
+let audioContext = null;
+let sourceNode = null;
+let gainNode = null;
+
+// 2. УТИЛИТЫ
+const formatTime = (seconds) => {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const min = Math.floor(seconds / 60);
+  const sec = Math.floor(seconds % 60);
+  return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+};
+
+const getValidCover = (url) => url || '/img/default-cover.png';
+
+function getStreamUrl(track) {
+  if (track.stream_url) return track.stream_url;
+  if (track.is_external && track.file_url) return track.file_url;
+  return `/api/tracks/${track.id}/stream`;
+}
+
+function initAudioContext() {
+  if (audioContext) return;
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    sourceNode = audioContext.createMediaElementSource(audioPlayer);
+    gainNode = audioContext.createGain();
+    sourceNode.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+  } catch (e) {
+    console.error('Web Audio API не поддерживается:', e);
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+async function loadUserLikes() {
+  try {
+    const res = await fetch('/api/library');
+    if (res.ok) {
+      const data = await res.json();
+      userLikedTrackIds = new Set(data.tracks.map(t => String(t.id)));
+    }
+  } catch (err) {}
+}
+
+async function loadAdminStats() {
+  try {
+    const res = await fetch('/api/admin/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    
+    const onlineEl = document.getElementById('admin-online');
+    const totalEl = document.getElementById('admin-total');
+    const playsEl = document.getElementById('admin-plays');
+    if (onlineEl) onlineEl.textContent = data.online;
+    if (totalEl) totalEl.textContent = data.total_users;
+    if (playsEl) playsEl.textContent = data.plays_today;
+
+    const usersContainer = document.getElementById('admin-users-list');
+    if (usersContainer && data.all_users) {
+      let html = '<table style="width:100%; text-align:left;">';
+      html += '<tr style="color:#1db954;"><th>ID</th><th>Email</th><th>Роль</th></tr>';
+      data.all_users.forEach(user => {
+        const roleColor = user.role === 'admin' ? '#ff4d4d' : '#b3b3b3';
+        html += `<tr>
+          <td style="padding: 3px 0;">${user.id}</td>
+          <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px;">${user.email}</td>
+          <td style="color: ${roleColor}; font-weight: bold;">${user.role}</td>
+        </tr>`;
+      });
+      html += '</table>';
+      usersContainer.innerHTML = html;
+    }
+  } catch (err) {
+    console.error('Ошибка загрузки админ-статистики:', err);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btnShowUsers = document.getElementById('btn-show-users');
+  if (btnShowUsers) {
+    btnShowUsers.addEventListener('click', () => {
+      const list = document.getElementById('admin-users-list');
+      list.style.display = list.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+});
+
+async function performSearch(query) {
+  if (!query || query.length < 2) return;
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
+  try {
+    const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    renderSearchResults(data.tracks, data.albums);
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка поиска.</p>';
+  }
+}
+
+// 3. СОХРАНЕНИЕ ПЛЕЕРА
+function savePlayerState() {
+  if (!audioPlayer.src) return;
+  const track = currentTracks[currentTrackIndex];
+  if (!track) return;
+  localStorage.setItem('muzlo_current_track', JSON.stringify(track));
+  localStorage.setItem('muzlo_current_time', audioPlayer.currentTime);
+  localStorage.setItem('muzlo_volume', volumeSlider.value);
+}
+
+async function restorePlayerState() {
+  const savedTrackJson = localStorage.getItem('muzlo_current_track');
+  const savedTime = parseFloat(localStorage.getItem('muzlo_current_time') || 0);
+  const savedVolume = localStorage.getItem('muzlo_volume');
+
+  if (savedVolume) {
+    volumeSlider.value = savedVolume;
+    updateVolume();
+  }
+
+  if (!savedTrackJson) return;
+
+  try {
+    const track = JSON.parse(savedTrackJson);
+    document.querySelector('.player')?.classList.remove('hidden');
+    playerTitle.textContent = track.title;
+    playerArtist.textContent = track.artist_name || 'Неизвестен';
+    if (track.cover_url) {
+      playerCover.src = track.cover_url;
+      playerCover.classList.remove('hidden');
+    } else {
+      playerCover.classList.add('hidden');
+    }
+    currentTrackRealDuration = track.duration || 0;
+    totalTimeEl.textContent = formatTime(currentTrackRealDuration);
+
+    audioPlayer.src = getStreamUrl(track);
+    isPlaying = false;
+    btnPlay.textContent = '▶';
+
+    audioPlayer.addEventListener('loadedmetadata', () => {
+      if (savedTime > 0 && savedTime < audioPlayer.duration) {
+        audioPlayer.currentTime = savedTime;
+        currentTimeEl.textContent = formatTime(savedTime);
+      }
+    }, { once: true });
+
+  } catch (e) {}
+}
+
+// 4. РЕНДЕР
+function renderTracks(tracksArray, isLibrary = false) {
+  currentTracks = tracksArray || [];
+  trackListEl.innerHTML = '';
+  if (currentTracks.length === 0) {
+    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ничего не найдено.</p>';
+    return;
+  }
+
+  currentTracks.forEach((track, index) => {
+    const div = document.createElement('div');
+    div.className = 'track-item';
+    div.dataset.index = index;
+
+    const isLiked = userLikedTrackIds.has(String(track.id));
+    let actionBtnHTML = isLibrary
+      ? `<button class="btn-delete" title="Удалить">✕</button>`
+      : `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
+
+    div.innerHTML = `
+      <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
+      <div class="track-info">
+        <div class="track-title">${track.title}</div>
+        <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name || 'Неизвестен'}">${track.artist_name || 'Неизвестен'}</span></div>
+      </div>
+      <div class="track-duration">${formatTime(track.duration)}</div>
+      ${actionBtnHTML}
+    `;
+
+    div.querySelector('.track-cover').onerror = function() {
+      this.onerror = null;
+      this.src = '/img/default-cover.png';
+    };
+
+    div.addEventListener('click', (e) => {
+      if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return;
+      document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+      div.classList.add('active');
+      currentTrackIndex = index;
+      playTrack(track);
+    });
+
+    const actionBtn = div.querySelector('.btn-like, .btn-delete');
+    if (isLibrary) {
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Удалить этот трек?')) return;
+        try {
+          const res = await fetch(`/api/library/${track.id}`, { method: 'DELETE' });
+          if (res.ok) {
+            userLikedTrackIds.delete(String(track.id));
+            navLibrary.click();
+          }
+        } catch (err) {}
+      });
+    } else {
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (actionBtn.classList.contains('liked')) return;
+
+        try {
+          const streamUrl = getStreamUrl(track);
+          const res = await fetch('/api/library', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              track_id: String(track.id), title: track.title, artist_name: track.artist_name,
+              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl
+            })
+          });
+          if (res.status === 401) {
+            alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
+          }
+          if (res.ok) {
+            actionBtn.classList.add('liked');
+            actionBtn.textContent = '❤';
+            userLikedTrackIds.add(String(track.id));
+          }
+        } catch (err) {}
+      });
+    }
+    trackListEl.appendChild(div);
+  });
+}
+
+// Функция для отрисовки поиска (Альбомы + Треки)
+function renderSearchResults(tracks, albums) {
+  currentTracks = tracks || [];
+  trackListEl.innerHTML = '';
+
+  // 1. Отрисовка Альбомов
+  if (albums && albums.length > 0) {
+    const albumHeader = document.createElement('h3');
+    albumHeader.textContent = 'Альбомы и плейлисты';
+    albumHeader.style.margin = '10px 0 15px 0';
+    albumHeader.style.color = '#b3b3b3';
+    albumHeader.style.fontSize = '18px';
+    trackListEl.appendChild(albumHeader);
+
+    albums.forEach(album => {
+      const div = document.createElement('div');
+      div.className = 'track-item';
+      div.innerHTML = `
+        <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
+        <div class="track-info">
+          <div class="track-title">${album.title}</div>
+          <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
+        </div>
+        <div class="track-duration" style="font-size: 20px;">💿</div>
+      `;
+      div.querySelector('.track-cover').onerror = function() {
+        this.onerror = null;
+        this.src = '/img/default-cover.png';
+      };
+      div.onclick = () => loadAlbum(album.permalink_url);
+      trackListEl.appendChild(div);
+    });
+  }
+
+  // 2. Отрисовка Треков
+  if (currentTracks.length > 0) {
+    const trackHeader = document.createElement('h3');
+    trackHeader.textContent = 'Треки';
+    trackHeader.style.margin = '25px 0 15px 0';
+    trackHeader.style.color = '#b3b3b3';
+    trackHeader.style.fontSize = '18px';
+    trackListEl.appendChild(trackHeader);
+
+    currentTracks.forEach((track, index) => {
+      const div = document.createElement('div');
+      div.className = 'track-item';
+      div.dataset.index = index;
+
+      const isLiked = userLikedTrackIds.has(String(track.id));
+      let actionBtnHTML = `<button class="btn-like ${isLiked ? 'liked' : ''}" title="Сохранить">${isLiked ? '❤' : '♥'}</button>`;
+
+      div.innerHTML = `
+        <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
+        <div class="track-info">
+          <div class="track-title">${track.title}</div>
+          <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name || 'Неизвестен'}">${track.artist_name || 'Неизвестен'}</span></div>
+        </div>
+        <div class="track-duration">${formatTime(track.duration)}</div>
+        ${actionBtnHTML}
+      `;
+
+      div.querySelector('.track-cover').onerror = function() {
+        this.onerror = null;
+        this.src = '/img/default-cover.png';
+      };
+
+      div.addEventListener('click', (e) => {
+        if (e.target.classList.contains('btn-like') || e.target.classList.contains('btn-delete') || e.target.classList.contains('artist-link')) return;
+        document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+        div.classList.add('active');
+        currentTrackIndex = index;
+        playTrack(track);
+      });
+
+      const actionBtn = div.querySelector('.btn-like');
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (actionBtn.classList.contains('liked')) return;
+
+        try {
+          const streamUrl = getStreamUrl(track);
+          const res = await fetch('/api/library', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              track_id: String(track.id), title: track.title, artist_name: track.artist_name,
+              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl
+            })
+          });
+          if (res.status === 401) {
+            alert('Войдите в аккаунт!'); authModal.classList.add('active'); return;
+          }
+          if (res.ok) {
+            actionBtn.classList.add('liked');
+            actionBtn.textContent = '❤';
+            userLikedTrackIds.add(String(track.id));
+          }
+        } catch (err) {}
+      });
+
+      trackListEl.appendChild(div);
+    });
+  }
+
+  if ((!albums || albums.length === 0) && currentTracks.length === 0) {
+    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ничего не найдено.</p>';
+  }
+}
+
+// Функция загрузки треков из альбома
+async function loadAlbum(albumUrl) {
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка альбома...</p>';
+  try {
+    const res = await fetchWithTimeout(`/api/search/album?url=${encodeURIComponent(albumUrl)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    trackListEl.innerHTML = `<button id="btn-back-search" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад к поиску</button>`;
+    renderTracks(data.tracks);
+    
+    document.getElementById('btn-back-search').addEventListener('click', () => performSearch(lastSearchQuery));
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки альбома.</p>';
+  }
+}
+
+trackListEl.addEventListener('click', (e) => {
+  if (e.target.classList.contains('artist-link')) {
+    e.stopPropagation();
+    loadArtistPage(e.target.dataset.artist);
+  }
+});
+
+// 5. АРТИСТ
+async function loadArtistPage(artistName) {
+  if (!artistName || artistName === 'Неизвестен') return;
+  [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
+  pageTitle.textContent = `Артист: ${artistName}`;
+  searchContainer.style.display = 'none';
+  profileStats.style.display = 'none';
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
+
+  try {
+    const res = await fetchWithTimeout(`/api/search/artist?name=${encodeURIComponent(artistName)}`);
+    const data = await res.json();
+    renderTracks(data.tracks);
+    const backBtnHTML = `<button id="btn-back-home" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад</button>`;
+    trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
+    document.getElementById('btn-back-home').addEventListener('click', () => navHome.click());
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
+  }
+}
+
+// 6. ВОСПРОИЗВЕДЕНИЕ
+function playTrack(track) {
+  const playerEl = document.querySelector('.player');
+  if (playerEl && playerEl.classList.contains('hidden')) {
+    playerEl.classList.remove('hidden');
+  }
+
+  initAudioContext();
+  if (audioContext && audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+
+  playerTitle.textContent = track.title;
+  playerArtist.textContent = track.artist_name || 'Неизвестен';
+
+  if (track.cover_url) {
+    playerCover.src = track.cover_url;
+    playerCover.classList.remove('hidden');
+  } else {
+    playerCover.classList.add('hidden');
+  }
+
+  currentTrackRealDuration = track.duration || 0;
+  totalTimeEl.textContent = formatTime(currentTrackRealDuration);
+  seekSlider.value = 0;
+
+  audioPlayer.src = getStreamUrl(track);
+
+  audioPlayer.play().then(() => {
+    isPlaying = true;
+    btnPlay.textContent = '⏸';
+    savePlayerState();
+
+    fetch('/api/search/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        track_id: track.id,
+        title: track.title,
+        artist_name: track.artist_name,
+        duration: track.duration
+      })
+    }).catch(err => console.log('Не авторизован'));
+
+  }).catch(err => {
+    console.error('Ошибка аудио:', err);
+    btnPlay.textContent = '▶';
+    isPlaying = false;
+  });
+
+  if (track.permalink_url) {
+    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.duration) {
+          currentTrackRealDuration = data.duration;
+          totalTimeEl.textContent = formatTime(data.duration);
+        }
+      }).catch(e => {});
+  }
+}
+
+btnPlay.addEventListener('click', () => {
+  if (!audioPlayer.src) return;
+  if (isPlaying) {
+    audioPlayer.pause();
+    btnPlay.textContent = '▶';
+    isPlaying = false;
+    savePlayerState();
+  } else {
+    audioPlayer.play();
+    btnPlay.textContent = '⏸';
+    isPlaying = true;
+  }
+});
+
+btnNext.addEventListener('click', () => {
+  if (currentTracks.length === 0) return;
+  document.querySelector(`.track-item[data-index="${(currentTrackIndex + 1) % currentTracks.length}"]`)?.click();
+});
+
+btnPrev.addEventListener('click', () => {
+  if (currentTracks.length === 0) return;
+  document.querySelector(`.track-item[data-index="${(currentTrackIndex - 1 + currentTracks.length) % currentTracks.length}"]`)?.click();
+});
+
+audioPlayer.addEventListener('timeupdate', () => {
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  if (!duration || isNaN(duration)) return;
+  if (!isSeeking) seekSlider.value = (audioPlayer.currentTime / duration) * 100;
+  currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+  if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
+});
+
+audioPlayer.addEventListener('loadedmetadata', () => {
+  totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
+});
+
+seekSlider.addEventListener('input', () => {
+  isSeeking = true;
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  if (!duration) return;
+  currentTimeEl.textContent = formatTime((seekSlider.value / 100) * duration);
+});
+
+seekSlider.addEventListener('change', () => {
+  isSeeking = false;
+  const duration = currentTrackRealDuration || audioPlayer.duration;
+  if (!duration) return;
+  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
+  savePlayerState();
+});
+
+function updateVolume() {
+  const value = parseInt(volumeSlider.value);
+  volumeLabel.textContent = value + '%';
+
+  if (value <= 100) {
+    if (gainNode) gainNode.gain.value = 1;
+    audioPlayer.volume = value / 100;
+  } else {
+    audioPlayer.volume = 1;
+    if (gainNode) gainNode.gain.value = value / 100;
+  }
+}
+
+volumeSlider.addEventListener('input', updateVolume);
+
+audioPlayer.addEventListener('ended', () => {
+  localStorage.removeItem('muzlo_current_track');
+  localStorage.removeItem('muzlo_current_time');
+  btnNext.click();
+});
+
+window.addEventListener('beforeunload', savePlayerState);
+
+// 7. НАВИГАЦИЯ
+function switchTab(activeTab, title, showSearch = false) {
+  [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
+  if (activeTab) activeTab.classList.add('active');
+  pageTitle.textContent = title;
+  searchContainer.style.display = showSearch ? 'block' : 'none';
+  profileStats.style.display = 'none';
+}
+
+navHome.addEventListener('click', async () => {
+  switchTab(navHome, 'Рекомендации');
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
+  await loadUserLikes();
+  try {
+    const res = await fetchWithTimeout('/api/search/trending');
+    const data = await res.json();
+    renderTracks(data.tracks);
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает.</p>';
+  }
+});
+
+navWave.addEventListener('click', async () => {
+  switchTab(navWave, 'Моя волна');
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Слушаем ваши вкусы...</p>';
+  await loadUserLikes();
+  try {
+    const res = await fetch('/api/search/my-wave');
+    if (res.status === 401) {
+      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
+      return;
+    }
+    const data = await res.json();
+    if (data.error) {
+      trackListEl.innerHTML = `<p style="color:red; text-align:center; margin-top:40px;">${data.error}</p>`;
+      return;
+    }
+    renderTracks(data.tracks);
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки волны.</p>';
+  }
+});
+
+navProfile.addEventListener('click', async () => {
+  switchTab(navProfile, 'Мой профиль');
+  trackListEl.innerHTML = '';
+  profileStats.style.display = 'block';
+  profileStats.innerHTML = '<p style="text-align:center;">Загрузка статистики...</p>';
+
+  try {
+    const res = await fetch('/api/search/stats');
+    if (res.status === 401) {
+      profileStats.innerHTML = '<p style="color:red; text-align:center;">Войдите в аккаунт, чтобы увидеть статистику.</p>';
+      return;
+    }
+    const data = await res.json();
+
+    const hours = Math.floor(data.total_seconds / 3600);
+    const minutes = Math.floor((data.total_seconds % 3600) / 60);
+
+    profileStats.innerHTML = `
+      <h2 style="margin-bottom: 20px;">Статистика прослушиваний</h2>
+      <p style="font-size: 18px; margin-bottom: 20px;">Всего прослушано: <strong style="color:#1db954;">${hours} ч ${minutes} мин</strong></p>
+
+      <h3 style="margin-bottom: 10px;">Топ артистов:</h3>
+      <ul style="list-style: none; padding: 0; margin-bottom: 20px;">
+        ${data.top_artists.map(a => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${a.artist_name} — <span style="color:#b3b3b3;">${a.count} раз</span></li>`).join('') || '<li>Нет данных</li>'}
+      </ul>
+
+      <h3 style="margin-bottom: 10px;">Топ треков:</h3>
+      <ul style="list-style: none; padding: 0;">
+        ${data.top_tracks.map(t => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${t.title} — <span style="color:#b3b3b3;">${t.artist_name} (${t.count} раз)</span></li>`).join('') || '<li>Нет данных</li>'}
+      </ul>
+    `;
+  } catch (err) {
+    profileStats.innerHTML = '<p style="color:red; text-align:center;">Ошибка загрузки статистики.</p>';
+  }
+});
+
+navSearch.addEventListener('click', async () => {
+  switchTab(navSearch, 'Поиск по миру', true);
+  searchInput.focus();
+  await loadUserLikes();
+  if (lastSearchQuery) {
+    searchInput.value = lastSearchQuery;
+    performSearch(lastSearchQuery);
+  } else {
+    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите название...</p>';
+  }
+});
+
+let searchTimeout;
+searchInput.addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  const query = e.target.value.trim();
+  lastSearchQuery = query;
+  if (query.length < 2) {
+    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
+    return;
+  }
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
+  searchTimeout = setTimeout(() => performSearch(query), 600);
+});
+
+navLibrary.addEventListener('click', async () => {
+  switchTab(navLibrary, 'Моя медиатека');
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
+  try {
+    const res = await fetchWithTimeout('/api/library');
+    if (res.status === 401) {
+      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
+      return;
+    }
+    const data = await res.json();
+    renderTracks(data.tracks, true);
+  } catch (err) {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
+  }
+});
+
+// 8. АВТОРИЗАЦИЯ
+authContainer.addEventListener('click', (e) => {
+  if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
+  if (e.target.id === 'btn-logout') logout();
+});
+
+function updateAuthUI(user) {
+  if (user) {
+    authContainer.innerHTML = `
+      <div class="profile-info" style="display: flex; flex-direction: column; gap: 10px;">
+        <span>👤 ${user.email}</span>
+        <button class="btn-logout" id="btn-logout" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer;">Выйти</button>
+        <button id="btn-show-change-password" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Сменить пароль</button>
+        <div id="change-password-form" style="display: none; margin-top: 10px; padding: 10px; background: #282828; border-radius: 8px;">
+          <input type="password" id="old-password" placeholder="Старый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">
+          <input type="password" id="new-password-profile" placeholder="Новый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">
+          <button id="btn-save-new-password" style="width: 100%; padding: 5px; background: #1db954; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">Сохранить</button>
+        </div>
+      </div>
+    `;
+    loadUserLikes();
+
+    const btnShowChangePass = document.getElementById('btn-show-change-password');
+    const changePassForm = document.getElementById('change-password-form');
+    
+    btnShowChangePass.addEventListener('click', () => {
+      changePassForm.style.display = changePassForm.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-save-new-password').addEventListener('click', async () => {
+      const oldPassword = document.getElementById('old-password').value;
+      const newPassword = document.getElementById('new-password-profile').value;
+
+      if (!oldPassword || !newPassword) return alert('Заполните оба поля');
+
+      try {
+        const res = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPassword, newPassword })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('Пароль успешно изменен!');
+          changePassForm.style.display = 'none';
+          document.getElementById('old-password').value = '';
+          document.getElementById('new-password-profile').value = '';
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {
+        alert('Ошибка сети');
+      }
+    });
+
+    if (user.role === 'admin' && adminWidget) {
+      adminWidget.style.display = 'block';
+      loadAdminStats();
+      if (adminInterval) clearInterval(adminInterval);
+      adminInterval = setInterval(loadAdminStats, 30000);
+    }
+  } else {
+    authContainer.innerHTML = `<button class="btn-auth" id="btn-open-auth">Войти</button>`;
+    userLikedTrackIds.clear();
+    if (adminWidget) adminWidget.style.display = 'none';
+    if (adminInterval) { clearInterval(adminInterval); adminInterval = null; }
+  }
+}
+
+document.getElementById('btn-close-auth').addEventListener('click', () => authModal.classList.remove('active'));
+document.getElementById('btn-toggle-auth').addEventListener('click', (e) => {
+  e.preventDefault();
+  isLoginMode = !isLoginMode;
+  document.getElementById('modal-title').textContent = isLoginMode ? 'Вход' : 'Регистрация';
+  document.getElementById('btn-submit-auth').textContent = isLoginMode ? 'Войти' : 'Зарегистрироваться';
+  document.getElementById('auth-toggle-text').textContent = isLoginMode ? 'Нет аккаунта?' : 'Уже есть аккаунт?';
+  document.getElementById('btn-toggle-auth').textContent = isLoginMode ? 'Зарегистрироваться' : 'Войти';
+});
+
+authForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('auth-email').value;
+  const password = document.getElementById('auth-password').value;
+  const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    authModal.classList.remove('active');
+    updateAuthUI(data.user);
+    authForm.reset();
+    if (navLibrary.classList.contains('active')) navLibrary.click();
+  } catch (err) { alert(err.message); }
+});
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  updateAuthUI(null);
+  navHome.click();
+}
+
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      updateAuthUI(data.user);
+    }
+  } catch (err) {}
+}
+
+// --- ЛОГИКА СБРОСА ПАРОЛЯ ---
+const btnForgot = document.getElementById('btn-forgot-password');
+const resetBlock = document.getElementById('reset-password-block');
+const btnBackToLogin = document.getElementById('btn-back-to-login');
+const btnSendCode = document.getElementById('btn-send-code');
+const resetStep2 = document.getElementById('reset-step-2');
+const btnConfirmReset = document.getElementById('btn-confirm-reset');
+
+if (btnForgot) {
+  btnForgot.addEventListener('click', (e) => {
+    e.preventDefault();
+    authForm.style.display = 'none';
+    resetBlock.style.display = 'block';
+  });
+
+  btnBackToLogin.addEventListener('click', (e) => {
+    e.preventDefault();
+    authForm.style.display = 'block';
+    resetBlock.style.display = 'none';
+    resetStep2.style.display = 'none';
+    btnSendCode.style.display = 'block';
+    btnSendCode.textContent = 'Получить код';
+  });
+
+  btnSendCode.addEventListener('click', async () => {
+    const email = document.getElementById('reset-email').value;
+    if (!email) return alert('Введите почту');
+    
+    btnSendCode.textContent = 'Отправка...';
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Код отправлен на почту! Проверьте папку Спам.');
+        resetStep2.style.display = 'block';
+        btnSendCode.style.display = 'none';
+      } else {
+        alert(data.error);
+        btnSendCode.textContent = 'Получить код';
+      }
+    } catch (e) {
+      alert('Ошибка сети');
+      btnSendCode.textContent = 'Получить код';
+    }
+  });
+
+  btnConfirmReset.addEventListener('click', async () => {
+    const email = document.getElementById('reset-email').value;
+    const code = document.getElementById('reset-code').value;
+    const newPassword = document.getElementById('reset-new-password').value;
+
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, newPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Пароль успешно изменен! Войдите с новым паролем.');
+        authForm.style.display = 'block';
+        resetBlock.style.display = 'none';
+        resetStep2.style.display = 'none';
+        btnSendCode.style.display = 'block';
+        btnSendCode.textContent = 'Получить код';
+        authForm.reset();
+      } else {
+        alert(data.error);
+      }
+    } catch (e) {
+      alert('Ошибка сети');
+    }
+  });
+}
+
+// 9. ИМПОРТ
+if (importBtn) {
+  importBtn.addEventListener('click', () => {
+    importModal.classList.add('active');
+    importStatus.textContent = '';
+    importUrlInput.value = '';
+    importTextInput.value = '';
+  });
+}
+
+btnCloseImport.addEventListener('click', () => importModal.classList.remove('active'));
+importModal.addEventListener('click', (e) => { if (e.target === importModal) importModal.classList.remove('active'); });
+
+btnDoImport.addEventListener('click', async () => {
+  const url = importUrlInput.value.trim();
+  const text = importTextInput.value.trim();
+
+  if (text) {
+    importStatus.style.color = '#1db954';
+    importStatus.textContent = 'Ищем треки в SoundCloud...';
+    btnDoImport.disabled = true;
+
+    try {
+      const res = await fetch('/api/search/import-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+
+      if (data.tracks && data.tracks.length > 0) {
+        importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
+        setTimeout(() => {
+          importModal.classList.remove('active');
+          switchTab(navSearch, 'Импортированные треки', false);
+          renderTracks(data.tracks);
+          btnDoImport.disabled = false;
+          importTextInput.value = '';
+        }, 1500);
+      } else {
+        importStatus.style.color = '#ff4d4d';
+        importStatus.textContent = data.error || 'Ничего не найдено.';
+        btnDoImport.disabled = false;
+      }
+    } catch (err) {
+      importStatus.style.color = '#ff4d4d';
+      importStatus.textContent = 'Ошибка соединения.';
+      btnDoImport.disabled = false;
+    }
+    return;
+  }
+
+  if (!url) {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Введите ссылку или вставьте список треков';
+    return;
+  }
+
+  let cleanUrl = url;
+  if (cleanUrl.includes('?')) cleanUrl = cleanUrl.split('?')[0];
+
+  let endpoint = '';
+  if (cleanUrl.includes('soundcloud.com')) {
+    endpoint = `/api/search/import-likes?url=${encodeURIComponent(cleanUrl)}`;
+  } else if (cleanUrl.includes('music.yandex.ru')) {
+    endpoint = `/api/search/import-yandex?url=${encodeURIComponent(cleanUrl)}`;
+  } else {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Вставьте ссылку SoundCloud/Яндекс или список треков';
+    return;
+  }
+
+  importStatus.style.color = '#1db954';
+  importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
+  btnDoImport.disabled = true;
+
+  try {
+    const res = await fetch(endpoint);
+    const data = await res.json();
+
+    if (data.tracks && data.tracks.length > 0) {
+      importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
+      setTimeout(() => {
+        importModal.classList.remove('active');
+        switchTab(navSearch, 'Импортированные треки', false);
+        renderTracks(data.tracks);
+        btnDoImport.disabled = false;
+      }, 1500);
+    } else {
+      importStatus.style.color = '#ff4d4d';
+      importStatus.textContent = data.error || 'Треки не найдены.';
+      btnDoImport.disabled = false;
+    }
+  } catch (err) {
+    importStatus.style.color = '#ff4d4d';
+    importStatus.textContent = 'Ошибка соединения.';
+    btnDoImport.disabled = false;
+  }
+});
+
+// 10. СТАРТ
+initAudioContext();
+restorePlayerState();
+checkAuth();
+navHome.click();
+
+// --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ) ---
+document.addEventListener('contextmenu', event => event.preventDefault());
+
+document.addEventListener('keydown', function(e) {
+  if (e.keyCode === 123) {
+    e.preventDefault();
+    return false;
+  }
+  if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) {
+    e.preventDefault();
+    return false;
+  }
+  if (e.ctrlKey && e.keyCode === 85) {
+    e.preventDefault();
+    return false;
+  }
+});

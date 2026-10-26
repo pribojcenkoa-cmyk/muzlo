@@ -19,7 +19,6 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// Вспомогательная функция форматирования трека
 function formatTrack(track) {
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
   if (cover) cover = cover.replace('large', 't500x500');
@@ -35,7 +34,6 @@ function formatTrack(track) {
   };
 }
 
-// Вспомогательная функция поиска
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
@@ -63,15 +61,48 @@ router.get('/trending', async (req, res) => {
   }
 });
 
-// 2. Поиск
+// 2. Поиск (ТРЕКИ + АЛЬБОМЫ)
 router.get('/', async (req, res) => {
   const q = req.query.q;
-  if (!q) return res.json({ tracks: [] });
+  if (!q) return res.json({ tracks: [], albums: [] });
   try {
-    const tracks = await searchSoundCloud(q);
-    res.json({ tracks });
+    // Ищем параллельно треки и плейлисты
+    const [tracks, playlistsRes] = await Promise.all([
+      searchSoundCloud(q).catch(() => []),
+      scdl.search({ query: q, resourceType: 'playlists', limit: 20 }).catch(() => ({ collection: [] }))
+    ]);
+
+    const albums = playlistsRes.collection.map(pl => {
+      let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
+      if (cover) cover = cover.replace('large', 't500x500');
+      return {
+        id: pl.id,
+        title: pl.title,
+        artist_name: pl.user ? pl.user.username : 'Неизвестен',
+        cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
+        track_count: pl.track_count,
+        permalink_url: pl.permalink_url,
+        is_album: true
+      };
+    });
+
+    res.json({ tracks, albums });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка поиска' });
+  }
+});
+
+// 2.1. Загрузка треков конкретного альбома
+router.get('/album', async (req, res) => {
+  try {
+    const albumUrl = req.query.url;
+    if (!albumUrl) return res.status(400).json({ error: 'URL не передан' });
+    
+    const playlist = await scdl.getSetInfo(albumUrl);
+    const tracks = playlist.tracks.map(track => formatTrack(track));
+    res.json({ tracks });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка загрузки альбома' });
   }
 });
 
@@ -206,7 +237,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Твой старый стабильный код)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -238,14 +269,13 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks: [formatTrack(info)] });
     }
 
-    // ПРОФИЛЬ (Лайки) - Экстракция ссылок через Jina AI
+    // ПРОФИЛЬ (Лайки)
     const username = parts[0];
     console.log(`[SoundCloud Import] Запуск извлечения лайков для: ${username}`);
     
     let tracks = [];
     
     try {
-      // 1. Запрашиваем страницу лайков через Jina AI
       const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
       console.log(`[SoundCloud Import] Запрос к Jina AI...`);
       
@@ -255,11 +285,8 @@ router.get('/import-likes', async (req, res) => {
       });
       
       const text = jinaRes.data;
-      
-      // 2. Ищем все ссылки на треки в тексте
       const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
       
-      // 3. Очищаем от дублей и отсеиваем системные страницы
       const trackUrls = [...new Set(urlMatches)].filter(u => {
         const p = u.replace('https://soundcloud.com/', '').split('/');
         return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
@@ -268,14 +295,11 @@ router.get('/import-likes', async (req, res) => {
       console.log(`[SoundCloud Import] Jina AI нашел ${trackUrls.length} ссылок на треки`);
 
       if (trackUrls.length > 0) {
-        // 4. Получаем информацию о каждом треке
         for (const trackUrl of trackUrls.slice(0, 40)) {
           try {
             const info = await scdl.getInfo(trackUrl);
             tracks.push(formatTrack(info));
-          } catch (e) {
-            // Пропускаем битые треки
-          }
+          } catch (e) {}
         }
       }
     } catch (jinaErr) {
