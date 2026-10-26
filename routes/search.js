@@ -103,7 +103,7 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна (Умная)
+// 5. Моя волна
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
@@ -205,32 +205,34 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Исправлена поддержка коротких ссылок и плейлистов)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (поддержка коротких ссылок и плейлистов)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
-  // Очищаем ссылку от параметров и слэшей
   url = url.split('?')[0].replace(/\/$/, '');
   
   try {
-    // Если ссылка короткая (on.soundcloud.com), пробуем её расшифровать
+    // Расшифровка короткой ссылки (on.soundcloud.com) через OEmbed API
     if (url.includes('on.soundcloud.com')) {
       console.log('[SoundCloud] Расшифровываем короткую ссылку:', url);
       try {
-        const redirectRes = await axios.get(url, { maxRedirects: 0, validateStatus: () => true });
-        if (redirectRes.headers.location) {
-          url = redirectRes.headers.location.split('?')[0].replace(/\/$/, '');
-          console.log('[SoundCloud] Перенаправление на:', url);
+        const oembedRes = await axios.get(
+          `https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`,
+          { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 }
+        );
+        if (oembedRes.data && oembedRes.data.url) {
+          url = oembedRes.data.url.split('?')[0].replace(/\/$/, '');
+          console.log('[SoundCloud] Полный URL:', url);
         }
       } catch (e) {
-        console.log('[SoundCloud] Не удалось расшифровать:', e.message);
+        console.log('[SoundCloud] OEmbed не сработал:', e.message);
       }
     }
 
     let result;
     
-    // Если в ссылке есть /sets/ — это плейлист (альбом)
+    // Плейлист (в ссылке есть /sets/)
     if (url.includes('/sets/')) {
       console.log('[SoundCloud] Загружаем плейлист:', url);
       const playlist = await scdl.getPlaylist(url);
@@ -271,7 +273,7 @@ router.get('/import-likes', async (req, res) => {
   }
 });
 
-// 9. ИМПОРТ ИЗ ЯНДЕКС.МУЗЫКИ (через прокси/API)
+// 9. ИМПОРТ ИЗ ЯНДЕКС.МУЗЫКИ (через прокси)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) {
@@ -326,7 +328,7 @@ router.get('/import-yandex', async (req, res) => {
   }
 
   if (parsedTracks.length === 0) {
-    return res.status(404).json({ error: 'Яндекс блокирует все прокси. Пожалуйста, используйте SoundCloud.' });
+    return res.status(404).json({ error: 'Яндекс блокирует все прокси. Пожалуйста, используйте SoundCloud или вставку текстом.' });
   }
 
   const tracks = [];
