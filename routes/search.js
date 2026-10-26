@@ -19,6 +19,7 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
+// Вспомогательная функция форматирования трека
 function formatTrack(track) {
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
   if (cover) cover = cover.replace('large', 't500x500');
@@ -34,6 +35,7 @@ function formatTrack(track) {
   };
 }
 
+// Вспомогательная функция поиска
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
@@ -98,78 +100,88 @@ router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
     if (!albumUrl) return res.status(400).json({ error: 'URL не передан' });
-
-    // Очищаем ссылку от параметров
     albumUrl = albumUrl.split('?')[0];
+
     console.log(`[SoundCloud Album] Загрузка: ${albumUrl}`);
 
-    // Попытка 1: Стандартный метод scdl (работает локально, но часто падает на Render)
+    // Попытка 1: Стандартный метод scdl
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
       if (playlist && playlist.tracks) {
+        console.log(`[SoundCloud Album] Способ 1 (scdl) успешно`);
         return res.json({ tracks: playlist.tracks.map(track => formatTrack(track)) });
       }
     } catch (e) {
-      console.log(`[SoundCloud Album] scdl метод упал: ${e.message}`);
+      console.log(`[SoundCloud Album] Способ 1 (scdl) упал: ${e.message}`);
     }
 
-    // Попытка 2: Через API v2 + прокси allorigins
-    if (!scdl.client_id) {
-      await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
+    // Попытка 2: Через Jina AI (парсим HTML страницы)
+    try {
+      console.log(`[SoundCloud Album] Пробуем Jina AI (HTML)...`);
+      const jinaUrl = `https://r.jina.ai/${albumUrl}`;
+      const jinaRes = await axios.get(jinaUrl, {
+          headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' },
+          timeout: 15000
+      });
+      
+      let html = jinaRes.data;
+      if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
+          const startStr = 'window.__sc_hydration = ';
+          const startIndex = html.indexOf(startStr);
+          const endIndex = html.indexOf('</script>', startIndex);
+          let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
+          if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
+
+          const hydration = JSON.parse(jsonStr);
+          const playlistData = hydration.find(item => item.hydratable === 'playlist' || item.hydratable === 'playlistInfo');
+          
+          if (playlistData && playlistData.data) {
+              const tracksData = playlistData.data.tracks || (playlistData.data.playlist && playlistData.data.playlist.tracks);
+              if (tracksData) {
+                 const tracks = tracksData.filter(t => t && t.duration).map(track => formatTrack(track));
+                 console.log(`[SoundCloud Album] Способ 2 (Jina HTML) успешно: ${tracks.length} треков`);
+                 return res.json({ tracks });
+              }
+          }
+      }
+    } catch (e) {
+      console.log(`[SoundCloud Album] Способ 2 (Jina HTML) упал: ${e.message}`);
     }
-    const clientId = scdl.client_id;
-    
-    if (clientId) {
-      const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(albumUrl)}&client_id=${clientId}`;
-      const resolveRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(resolveUrl)}`, {timeout: 10000}).catch(() => null);
 
-      if (resolveRes && resolveRes.data && resolveRes.data.id) {
-        const playlistId = resolveRes.data.id;
-        const playlistUrl = `https://api-v2.soundcloud.com/playlists/${playlistId}?client_id=${clientId}`;
-        const playlistRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(playlistUrl)}`, {timeout: 10000}).catch(() => null);
+    // Попытка 3: Через Jina AI (парсим текст, ищем ссылки)
+    try {
+      console.log(`[SoundCloud Album] Пробуем Jina AI (Text)...`);
+      const jinaUrl = `https://r.jina.ai/${albumUrl}`;
+      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 15000 });
+      const text = jinaRes.data;
+      
+      const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
+      const trackUrls = [...new Set(urlMatches)].filter(u => {
+        const p = u.replace('https://soundcloud.com/', '').split('/');
+        return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
+      });
 
-        if (playlistRes && playlistRes.data && playlistRes.data.tracks) {
-          const tracks = playlistRes.data.tracks.filter(t => t && t.duration).map(track => formatTrack(track));
-          console.log(`[SoundCloud Album] Успешно через API v2 (прокси): ${tracks.length} треков`);
+      if (trackUrls.length > 0) {
+        const tracks = [];
+        for (const tUrl of trackUrls) {
+          try {
+            const info = await scdl.getInfo(tUrl);
+            tracks.push(formatTrack(info));
+          } catch (e) {}
+        }
+        if (tracks.length > 0) {
+          console.log(`[SoundCloud Album] Способ 3 (Jina Text) успешно: ${tracks.length} треков`);
           return res.json({ tracks });
         }
       }
-    }
-
-    // Попытка 3: Через Jina AI (парсим HTML страницы)
-    console.log(`[SoundCloud Album] Пробуем Jina AI...`);
-    const jinaUrl = `https://r.jina.ai/${albumUrl}`;
-    const jinaRes = await axios.get(jinaUrl, {
-        headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' },
-        timeout: 20000
-    });
-    
-    let html = jinaRes.data;
-    if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
-        const startStr = 'window.__sc_hydration = ';
-        const startIndex = html.indexOf(startStr);
-        const endIndex = html.indexOf('</script>', startIndex);
-        let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
-        if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
-
-        const hydration = JSON.parse(jsonStr);
-        // Ищем данные плейлиста в гидратации
-        const playlistData = hydration.find(item => item.hydratable === 'playlist' || item.hydratable === 'playlistInfo');
-        
-        if (playlistData && playlistData.data) {
-            const tracksData = playlistData.data.tracks || (playlistData.data.playlist && playlistData.data.playlist.tracks);
-            if (tracksData) {
-               const tracks = tracksData.filter(t => t && t.duration).map(track => formatTrack(track));
-               console.log(`[SoundCloud Album] Успешно через Jina AI: ${tracks.length} треков`);
-               return res.json({ tracks });
-            }
-        }
+    } catch (e) {
+      console.log(`[SoundCloud Album] Способ 3 (Jina Text) упал: ${e.message}`);
     }
 
     throw new Error('Все методы загрузки альбома исчерпаны');
   } catch (err) {
     console.error('[SoundCloud Album] Ошибка:', err.message);
-    res.status(500).json({ error: 'Ошибка загрузки альбома. Сервер заблокирован SoundCloud.' });
+    res.status(500).json({ error: 'Ошибка загрузки альбома.' });
   }
 });
 
@@ -304,7 +316,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Лайки через Jina AI)
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -336,7 +348,6 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks: [formatTrack(info)] });
     }
 
-    // ПРОФИЛЬ (Лайки)
     const username = parts[0];
     console.log(`[SoundCloud Import] Запуск извлечения лайков для: ${username}`);
     

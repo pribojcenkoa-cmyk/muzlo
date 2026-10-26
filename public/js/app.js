@@ -401,11 +401,16 @@ function renderSearchResults(tracks, albums) {
   }
 }
 
-// Функция загрузки треков из альбома
+// Функция загрузки треков из альбома (С увеличенным таймаутом)
 async function loadAlbum(albumUrl) {
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка альбома...</p>';
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка альбома... (это может занять 10-15 сек)</p>';
   try {
-    const res = await fetchWithTimeout(`/api/search/album?url=${encodeURIComponent(albumUrl)}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 секунд
+
+    const res = await fetch(`/api/search/album?url=${encodeURIComponent(albumUrl)}`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
 
@@ -414,6 +419,7 @@ async function loadAlbum(albumUrl) {
     
     document.getElementById('btn-back-search').addEventListener('click', () => performSearch(lastSearchQuery));
   } catch (err) {
+    console.error('Ошибка загрузки альбома:', err);
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки альбома.</p>';
   }
 }
@@ -822,17 +828,18 @@ const btnBackToLogin = document.getElementById('btn-back-to-login');
 const btnSendCode = document.getElementById('btn-send-code');
 const resetStep2 = document.getElementById('reset-step-2');
 const btnConfirmReset = document.getElementById('btn-confirm-reset');
+const authFormContainer = document.getElementById('auth-login-block'); // Обертка формы
 
 if (btnForgot) {
   btnForgot.addEventListener('click', (e) => {
     e.preventDefault();
-    authForm.style.display = 'none';
+    if (authFormContainer) authFormContainer.style.display = 'none';
     resetBlock.style.display = 'block';
   });
 
   btnBackToLogin.addEventListener('click', (e) => {
     e.preventDefault();
-    authForm.style.display = 'block';
+    if (authFormContainer) authFormContainer.style.display = 'block';
     resetBlock.style.display = 'none';
     resetStep2.style.display = 'none';
     btnSendCode.style.display = 'block';
@@ -844,6 +851,7 @@ if (btnForgot) {
     if (!email) return alert('Введите почту');
     
     btnSendCode.textContent = 'Отправка...';
+    btnSendCode.disabled = true;
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
@@ -858,10 +866,12 @@ if (btnForgot) {
       } else {
         alert(data.error);
         btnSendCode.textContent = 'Получить код';
+        btnSendCode.disabled = false;
       }
     } catch (e) {
       alert('Ошибка сети');
       btnSendCode.textContent = 'Получить код';
+      btnSendCode.disabled = false;
     }
   });
 
@@ -879,11 +889,12 @@ if (btnForgot) {
       const data = await res.json();
       if (res.ok) {
         alert('Пароль успешно изменен! Войдите с новым паролем.');
-        authForm.style.display = 'block';
+        if (authFormContainer) authFormContainer.style.display = 'block';
         resetBlock.style.display = 'none';
         resetStep2.style.display = 'none';
         btnSendCode.style.display = 'block';
         btnSendCode.textContent = 'Получить код';
+        btnSendCode.disabled = false;
         authForm.reset();
       } else {
         alert(data.error);
