@@ -205,12 +205,13 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Защищенный от падений)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (С защитой от блокировки IP)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
-  url = url.split('?')[0].replace(/\/$/, '');
+  // Очищаем ссылку
+  url = url.split('?')[0].replace(/\/$/, '').replace('/likes', '');
   
   try {
     // 1. Расшифровка короткой ссылки
@@ -220,22 +221,20 @@ router.get('/import-likes', async (req, res) => {
         if (oembed.data && oembed.data.url) url = oembed.data.url.split('?')[0].replace(/\/$/, '');
       } catch (e) {
         try {
-          const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-          if (response.request && response.request.res && response.request.res.responseUrl) {
-            url = response.request.res.responseUrl.split('?')[0].replace(/\/$/, '');
-          }
+          const redirect = await axios.get(url, { maxRedirects: 0, validateStatus: () => true, headers: { 'User-Agent': 'Mozilla/5.0' } });
+          if (redirect.headers.location) url = redirect.headers.location.split('?')[0].replace(/\/$/, '');
         } catch (err) {}
       }
     }
 
-    // Если не удалось расшифровать — ошибка
+    // Если ссылка всё ещё короткая — выдаем ошибку 400 (а не 500)
     if (url.includes('on.soundcloud.com')) {
-      return res.status(400).json({ error: 'Не удалось открыть короткую ссылку. Проверьте, что профиль открыт.' });
+      return res.status(400).json({ error: 'Не удалось расшифровать короткую ссылку SoundCloud.' });
     }
 
     let tracks = [];
 
-    // 2. Плейлист (есть /sets/)
+    // 2. Плейлист
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
       tracks = playlist.tracks.map(track => {
@@ -252,7 +251,7 @@ router.get('/import-likes', async (req, res) => {
     }
 
     // 3. Одиночный трек
-    const parts = url.replace('https://soundcloud.com/', '').replace('http://soundcloud.com/', '').split('/');
+    const parts = url.replace('https://soundcloud.com/', '').split('/');
     if (parts.length >= 2) {
       const info = await scdl.getInfo(url);
       tracks = [{
@@ -264,15 +263,27 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks });
     }
 
-    // 4. Профиль (ищем лайки через официальный API)
+    // 4. Профиль (Лайки) — используем прокси для обхода блокировки IP на Render
     const username = parts[0];
-    const profileRes = await axios.get(`https://soundcloud.com/${username}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    
+    // Запрашиваем страницу профиля через прокси codetabs, чтобы получить client_id
+    const profileUrl = `https://soundcloud.com/${username}`;
+    const proxyProfileUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(profileUrl)}`;
+    const profileRes = await axios.get(proxyProfileUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    
     const clientIdMatch = profileRes.data.match(/client_id:"(.*?)"/);
     
     if (clientIdMatch) {
       const clientId = clientIdMatch[1];
-      const userRes = await axios.get(`https://api-v2.soundcloud.com/resolve?url=https://soundcloud.com/${username}&client_id=${clientId}`);
-      const likesRes = await axios.get(`https://api-v2.soundcloud.com/users/${userRes.data.id}/likes?client_id=${clientId}&limit=100`);
+      
+      // Запрашиваем ID пользователя через прокси
+      const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(profileUrl)}&client_id=${clientId}`;
+      const userRes = await axios.get(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(resolveUrl)}`);
+      
+      // Запрашиваем лайки через прокси
+      const likesUrl = `https://api-v2.soundcloud.com/users/${userRes.data.id}/likes?client_id=${clientId}&limit=100`;
+      const likesRes = await axios.get(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(likesUrl)}`);
+      
       const rawTracks = likesRes.data.collection.map(item => item.track || item);
       tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => {
         let cover = track.artwork_url || (track.user && track.user.avatar_url);
@@ -286,12 +297,12 @@ router.get('/import-likes', async (req, res) => {
       });
       return res.json({ tracks });
     } else {
-      throw new Error('Не удалось получить Client ID');
+      throw new Error('Не удалось получить Client ID профиля');
     }
 
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    res.status(500).json({ error: 'Ошибка импорта. Профиль скрыт или SoundCloud блокирует сервер.' }); 
+    res.status(500).json({ error: 'Ошибка импорта. Возможно, профиль закрыт или SoundCloud блокирует сервер.' }); 
   }
 });
 

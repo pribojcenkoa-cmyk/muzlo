@@ -14,7 +14,7 @@ import authRoutes from './routes/auth.js';
 import trackRoutes from './routes/tracks.js';
 import searchRoutes from './routes/search.js';
 import libraryRoutes from './routes/library.js';
-import adminRoutes from './routes/admin.js'; // <-- Перенесли наверх
+import adminRoutes from './routes/admin.js'; // <-- Добавили админку
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,7 +37,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tracks', trackRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/library', libraryRoutes);
-app.use('/api/admin', adminRoutes); // <-- Подключили до app.listen
+app.use('/api/admin', adminRoutes); // <-- Подключили админку ДО app.listen
 
 // Проверка работоспособности
 app.get('/api/health', async (req, res) => {
