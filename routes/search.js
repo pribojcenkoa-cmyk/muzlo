@@ -205,31 +205,52 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. Импорт из SoundCloud
+// 8. Импорт из SoundCloud (Лайки профиля ИЛИ Плейлист)
 router.get('/import-likes', async (req, res) => {
-  let profileUrl = req.query.url;
-  if (!profileUrl) return res.status(400).json({ error: 'Ссылка не передана' });
-  profileUrl = profileUrl.replace(/\/$/, '');
+  let url = req.query.url;
+  if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
+  
+  url = url.split('?')[0].replace(/\/$/, '');
+  
   try {
-    const likesUrl = `${profileUrl}/likes`;
-    const likesResult = await scdl.getTracks({ url: likesUrl, limit: 100 });
+    let result;
     
-    if (!likesResult.collection || likesResult.collection.length === 0) {
-      return res.json({ tracks: [], message: 'Лайки не найдены' });
+    if (url.includes('/sets/')) {
+      console.log('[SoundCloud] Загружаем плейлист:', url);
+      const playlist = await scdl.getPlaylist(url);
+      result = { collection: playlist.tracks };
+    } else {
+      console.log('[SoundCloud] Загружаем лайки профиля:', url);
+      const likesUrl = `${url}/likes`;
+      result = await scdl.getTracks({ url: likesUrl, limit: 100 });
+    }
+    
+    if (!result.collection || result.collection.length === 0) {
+      return res.json({ tracks: [], message: 'Треки не найдены' });
     }
 
-    const tracks = likesResult.collection.filter(track => track.duration < 900000).map(track => {
-      let cover = track.artwork_url || (track.user && track.user.avatar_url);
-      if (cover) cover = cover.replace('large', 't500x500');
-      return {
-        id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
-        cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-        duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
-        stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false 
-      };
-    });
+    const tracks = result.collection
+      .filter(track => track && track.duration < 900000)
+      .map(track => {
+        let cover = track.artwork_url || (track.user && track.user.avatar_url);
+        if (cover) cover = cover.replace('large', 't500x500');
+        return {
+          id: track.id, 
+          title: track.title, 
+          artist_name: track.user ? track.user.username : 'Неизвестен',
+          cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
+          duration: Math.round(track.duration / 1000), 
+          permalink_url: track.permalink_url,
+          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, 
+          is_external: false 
+        };
+      });
+      
     res.json({ tracks });
-  } catch (err) { res.status(500).json({ error: 'Ошибка импорта' }); }
+  } catch (err) { 
+    console.error('Ошибка импорта SoundCloud:', err);
+    res.status(500).json({ error: 'Ошибка импорта. Проверьте, что ссылка открыта для всех.' }); 
+  }
 });
 
 // 9. Импорт из Яндекс.Музыки (через прокси/API)
@@ -307,7 +328,7 @@ router.get('/import-yandex', async (req, res) => {
   res.json({ tracks });
 });
 
-// 10. ИМПОРТ ИЗ ТЕКСТА (Список треков)
+// 10. Импорт из ТЕКСТА
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
   if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список треков' });
@@ -318,9 +339,7 @@ router.post('/import-text', async (req, res) => {
   for (const line of lines) {
     try {
       const found = await searchSoundCloud(line);
-      if (found.length > 0) {
-        tracks.push(found[0]);
-      }
+      if (found.length > 0) tracks.push(found[0]);
     } catch (e) {}
   }
 
