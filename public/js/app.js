@@ -42,7 +42,7 @@ let currentTrackRealDuration = 0;
 let isSeeking = false;
 let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
-let userSavedAlbumIds = new Set(); // НОВОЕ: для сохраненных альбомов
+let userSavedAlbumIds = new Set();
 let adminInterval = null;
 
 // Web Audio API
@@ -94,17 +94,19 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
 
 async function loadUserLikes() {
   try {
-    // Загружаем треки
     const resTracks = await fetch('/api/library');
     if (resTracks.ok) {
       const data = await resTracks.json();
-      userLikedTrackIds = new Set(data.tracks.map(t => String(t.track_id)));
+      if (data.tracks) {
+        userLikedTrackIds = new Set(data.tracks.map(t => String(t.track_id || t.id)));
+      }
     }
-    // Загружаем альбомы
     const resAlbums = await fetch('/api/library/albums');
     if (resAlbums.ok) {
       const data = await resAlbums.json();
-      userSavedAlbumIds = new Set(data.albums.map(a => String(a.album_id)));
+      if (data.albums) {
+        userSavedAlbumIds = new Set(data.albums.map(a => String(a.album_id)));
+      }
     }
   } catch (err) {}
 }
@@ -340,7 +342,6 @@ function renderSearchResults(tracks, albums) {
         loadAlbum(album.permalink_url);
       };
 
-      // Сохранение альбома в медиатеку
       const actionBtn = div.querySelector('.btn-like');
       actionBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -763,98 +764,22 @@ navLibrary.addEventListener('click', async () => {
     const dataTracks = await resTracks.json();
     const dataAlbums = resAlbums.ok ? await resAlbums.json() : { albums: [] };
 
-    trackListEl.innerHTML = '';
-
-    // Отрисовка сохраненных альбомов
-    if (dataAlbums.albums && dataAlbums.albums.length > 0) {
-      const albumHeader = document.createElement('h3');
-      albumHeader.textContent = 'Сохраненные альбомы';
-      albumHeader.style.margin = '10px 0 15px 0';
-      albumHeader.style.color = '#b3b3b3';
-      albumHeader.style.fontSize = '18px';
-      trackListEl.appendChild(albumHeader);
-
-      dataAlbums.albums.forEach(album => {
-        const div = document.createElement('div');
-        div.className = 'track-item';
-        div.innerHTML = `
-          <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
-          <div class="track-info">
-            <div class="track-title">${album.title}</div>
-            <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
-          </div>
-          <div class="track-duration" style="font-size: 20px;">💿</div>
-          <button class="btn-delete" title="Удалить">✕</button>
-        `;
-        div.querySelector('.track-cover').onerror = function() {
-          this.onerror = null;
-          this.src = '/img/default-cover.png';
-        };
-        
-        div.onclick = (e) => {
-          if (e.target.classList.contains('btn-delete')) return;
-          loadAlbum(album.permalink_url);
-        };
-
-        const deleteBtn = div.querySelector('.btn-delete');
-        deleteBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (!confirm('Удалить этот альбом из медиатеки?')) return;
-          try {
-            const res = await fetch(`/api/library/albums/${album.album_id}`, { method: 'DELETE' });
-            if (res.ok) {
-              userSavedAlbumIds.delete(String(album.album_id));
-              navLibrary.click();
-            }
-          } catch (err) {}
-        });
-
-        trackListEl.appendChild(div);
-      });
-    }
-
-    // Отрисовка сохраненных треков
-    if (dataTracks.tracks && dataTracks.tracks.length > 0) {
-      const trackHeader = document.createElement('h3');
-      trackHeader.textContent = 'Сохраненные треки';
-      trackHeader.style.margin = '25px 0 15px 0';
-      trackHeader.style.color = '#b3b3b3';
-      trackHeader.style.fontSize = '18px';
-      trackListEl.appendChild(trackHeader);
-
-      const tracksContainer = document.createElement('div');
-      trackListEl.appendChild(tracksContainer);
-      // Временно подменяем trackListEl для функции renderTracks
-      const originalTrackList = trackListEl;
-      const tempTrackList = tracksContainer; 
-      tempTrackList.id = 'track-list'; 
-      
-      // Чтобы не сломать логику renderTracks, просто отрисуем треки вручную или создадим контейнер
-      // Проще вызвать renderTracks, но она очищает trackListEl. 
-      // Поэтому мы вызовем её, передав пустой массив, а потом допишем альбомы обратно? Нет, лучше создать функцию.
-      // Для простоты используем копию renderTracks, но ограничимся тем, что просто вызовем renderTracks(dataTracks.tracks, true) 
-      // ПРЕДВАРИТЕЛЬНО сохранив альбомы. 
-      // На самом деле проще: перерисуем всё через новую функцию.
-      
-      // Упростим: просто выведем треки, вызвав старую функцию, но она сотрет альбомы.
-      // Поэтому в renderTracks мы добавили поддержку isLibrary, но она очищает ВЕСЬ trackListEl.
-      // Значит, нужно отрисовывать альбомы ПОСЛЕ треков, либо объединить.
-      // Сделаем проще: отрисуем треки через renderTracks, а потом добавим альбомы в начало.
-    }
+    // Выводим в консоль для отладки
+    console.log("Библиотека треков с сервера:", dataTracks);
     
-    // Чтобы не усложнять код, я перепишу логику отрисовки медиатеки прямо здесь.
-    renderLibraryPage(dataTracks.tracks, dataAlbums.albums);
+    renderLibraryPage(dataTracks.tracks || [], dataAlbums.albums || []);
 
   } catch (err) {
+    console.error(err);
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
   }
 });
 
-// Новая функция для отрисовки медиатеки
+// Новая функция для отрисовки медиатеки (Альбомы + Треки)
 function renderLibraryPage(tracks, albums) {
   trackListEl.innerHTML = '';
   
-  // Альбомы
+  // 1. Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Сохраненные альбомы';
@@ -902,7 +827,7 @@ function renderLibraryPage(tracks, albums) {
     });
   }
 
-  // Треки
+  // 2. Треки
   if (tracks && tracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Сохраненные треки';
@@ -911,7 +836,6 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
 
-    // Отрисовываем треки вручную, чтобы не затирать альбомы
     tracks.forEach((track, index) => {
       const div = document.createElement('div');
       div.className = 'track-item';
