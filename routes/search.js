@@ -206,17 +206,17 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Парсинг HTML через прокси без API)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
 
-  // Автоматическая очистка ссылки от ?utm и /likes
+  // Очистка ссылки
   let url = rawUrl.split('?')[0].split('#')[0].replace(/\/$/, '');
   url = url.replace('/likes', '');
 
   try {
-    // 1. Расшифровка коротких ссылок
+    // Расшифровка коротких ссылок
     if (url.includes('on.soundcloud.com')) {
       try {
         const info = await scdl.getInfo(url);
@@ -228,68 +228,74 @@ router.get('/import-likes', async (req, res) => {
       }
     }
 
-    // 2. Плейлист
+    // Плейлист
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
       const tracks = playlist.tracks.map(track => formatTrack(track));
       return res.json({ tracks });
     }
 
-    // 3. Одиночный трек
+    // Одиночный трек
     const parts = url.replace('https://soundcloud.com/', '').replace('http://soundcloud.com/', '').split('/');
     if (parts.length >= 2) {
       const info = await scdl.getInfo(url);
       return res.json({ tracks: [formatTrack(info)] });
     }
 
-    // 4. Профиль (Парсинг HTML лайков через прокси)
+    // Профиль (Лайки) - Парсинг HTML
     const username = parts[0];
     const likesUrl = `https://soundcloud.com/${username}/likes`;
     
-    // Список прокси для обхода блокировки Cloudflare на Render
+    // Надежные прокси
     const proxies = [
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(likesUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(likesUrl)}`,
-      `https://corsproxy.io/?${encodeURIComponent(likesUrl)}`
+      `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(likesUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(likesUrl)}`
     ];
 
-    let rawTracks = null;
-
+    let html = '';
     for (const proxy of proxies) {
       try {
         const proxyRes = await axios.get(proxy, { 
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }, 
           timeout: 10000 
         });
-        
-        const html = proxyRes.data;
-        
-        // Извлекаем скрытый JSON со страницы (hydratable data)
-        const match = html.match(/window\.__sc_hydration\s*=\s*(\[.*?\]);/);
-        if (match) {
-          const hydration = JSON.parse(match[1]);
-          const likesData = hydration.find(item => item.hydratable === 'likes');
-          
-          if (likesData && likesData.data && likesData.data.collection) {
-            rawTracks = likesData.data.collection.map(item => item.track || item).filter(Boolean);
-            break; // Если сработало, выходим из цикла
-          }
+        // Проверяем, что вернулся HTML с нужным скриптом
+        if (proxyRes.data && typeof proxyRes.data === 'string' && proxyRes.data.includes('window.__sc_hydration')) {
+          html = proxyRes.data;
+          break;
         }
       } catch (e) {
-        console.log(`[SoundCloud Proxy Fail] ${proxy.substring(0, 30)}...`);
+        console.log(`[Proxy Fail] ${proxy.substring(0, 30)}...`);
       }
     }
 
-    if (!rawTracks) {
-      throw new Error('Не удалось получить лайки. Cloudflare блокирует все прокси.');
+    if (!html) throw new Error('Прокси не смогли получить страницу с лайками');
+
+    // Извлекаем JSON без регулярных выражений (они ломаются на переносах строк)
+    const startStr = 'window.__sc_hydration = ';
+    const startIndex = html.indexOf(startStr);
+    if (startIndex === -1) throw new Error('Не найден __sc_hydration');
+
+    const endIndex = html.indexOf('</script>', startIndex);
+    if (endIndex === -1) throw new Error('Не найден конец скрипта');
+
+    let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
+    if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1); // Убираем точку с запятой на конце
+
+    const hydration = JSON.parse(jsonStr);
+    const likesData = hydration.find(item => item.hydratable === 'likes');
+    
+    if (!likesData || !likesData.data || !likesData.data.collection) {
+      throw new Error('В JSON не найдены лайки');
     }
 
+    const rawTracks = likesData.data.collection.map(item => item.track || item).filter(Boolean);
     const tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => formatTrack(track));
-    res.json({ tracks });
+
+    return res.json({ tracks });
 
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    // Отдаем 400, чтобы фронтенд показал понятную ошибку
     res.status(400).json({ error: 'SoundCloud заблокировал запрос. Используйте импорт текстом.' }); 
   }
 });
@@ -312,9 +318,8 @@ router.get('/import-yandex', async (req, res) => {
 
   if (apiUrl) {
     const PROXIES = [
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(apiUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`,
-      `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`
+      `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(apiUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`
     ];
 
     for (const proxyUrl of PROXIES) {
