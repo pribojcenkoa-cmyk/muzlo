@@ -95,16 +95,46 @@
   <div class="modal" id="auth-modal">
     <div class="modal-content">
       <span class="close-btn" id="btn-close-auth">&times;</span>
-      <h2 id="modal-title">Вход</h2>
-      <form id="auth-form">
-        <input type="email" id="auth-email" placeholder="Email" required>
-        <input type="password" id="auth-password" placeholder="Пароль (мин. 6 символов)" required>
-        <button type="submit" class="btn-submit" id="btn-submit-auth">Войти</button>
-      </form>
-      <p class="toggle-auth">
-        <span id="auth-toggle-text">Нет аккаунта?</span> 
-        <a href="#" id="btn-toggle-auth">Зарегистрироваться</a>
-      </p>
+      
+      <!-- Блок входа/регистрации -->
+      <div id="auth-login-block">
+        <h2 id="modal-title">Вход</h2>
+        <form id="auth-form">
+          <input type="email" id="auth-email" placeholder="Email" required>
+          <input type="password" id="auth-password" placeholder="Пароль (мин. 6 символов)" required>
+          <button type="submit" class="btn-submit" id="btn-submit-auth">Войти</button>
+        </form>
+        
+        <p class="toggle-auth" style="margin-bottom: 5px;">
+          <span id="auth-toggle-text">Нет аккаунта?</span> 
+          <a href="#" id="btn-toggle-auth">Зарегистрироваться</a>
+        </p>
+
+        <!-- Ссылка "Забыли пароль?" -->
+        <p style="text-align: center; margin-top: 10px;">
+          <a href="#" id="btn-forgot-password" style="color: #b3b3b3; font-size: 14px; text-decoration: underline;">Забыли пароль?</a>
+        </p>
+      </div>
+
+      <!-- Блок сброса пароля (скрыт по умолчанию) -->
+      <div id="reset-password-block" style="display: none;">
+        <h2 style="text-align: center; margin-bottom: 20px;">Сброс пароля</h2>
+        
+        <input type="email" id="reset-email" placeholder="Ваша почта" required style="width: 100%; padding: 12px; margin-bottom: 10px; background: #121212; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 14px; box-sizing: border-box;">
+        
+        <button type="button" id="btn-send-code" class="btn-submit" style="width: 100%;">Получить код</button>
+        
+        <div id="reset-step-2" style="display: none; margin-top: 15px;">
+          <input type="text" id="reset-code" placeholder="Код из письма" required style="width: 100%; padding: 12px; margin-bottom: 10px; background: #121212; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 14px; box-sizing: border-box;">
+          <input type="password" id="reset-new-password" placeholder="Новый пароль" required style="width: 100%; padding: 12px; margin-bottom: 10px; background: #121212; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 14px; box-sizing: border-box;">
+          <button type="button" id="btn-confirm-reset" class="btn-submit" style="width: 100%;">Сохранить пароль</button>
+        </div>
+
+        <p style="text-align: center; margin-top: 15px;">
+          <a href="#" id="btn-back-to-login" style="color: #b3b3b3; font-size: 14px; text-decoration: underline;">Вернуться к входу</a>
+        </p>
+      </div>
+
     </div>
   </div>
 
