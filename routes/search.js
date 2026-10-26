@@ -96,7 +96,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2.1. Загрузка треков конкретного альбома (Тройная защита)
+// 2.1. Загрузка треков конкретного альбома
 router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
@@ -455,90 +455,18 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг (ИСПОЛЬЗУЕМ ВНЕШНИЕ ПРОКСИ ДЛЯ ОБХОДА IP)
+// 12. Стриминг (Только надежный scdl.download)
 router.get('/stream', async (req, res) => {
-  const trackUrl = req.query.url;
-  if (!trackUrl) return res.status(400).send('URL required');
-
-  // Функция для запасного метода
-  const fallbackToScdl = async () => {
-    try {
-      console.log('Переключение на запасной метод scdl.download');
-      const stream = await scdl.download(trackUrl);
-      res.setHeader('Content-Type', 'audio/mpeg');
-      stream.pipe(res);
-    } catch (e) {
-      console.error('Запасной метод тоже упал:', e.message);
-      if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
-    }
-  };
-
   try {
-    // 1. Получаем информацию о треке
-    let info;
-    try {
-      info = await scdl.getInfo(trackUrl);
-    } catch (e) {
-      return fallbackToScdl();
-    }
+    const trackUrl = req.query.url;
+    if (!trackUrl) throw new Error('Ссылка не передана');
 
-    let directUrl = null;
-    // Ищем прямой mp3 поток (progressive)
-    if (info.media && info.media.transcodings) {
-      const progressive = info.media.transcodings.find(t => t.format.protocol === 'progressive');
-      if (progressive) {
-        if (!scdl.client_id) await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 });
-        const transUrl = `${progressive.url}?client_id=${scdl.client_id}`;
-        const transRes = await axios.get(transUrl);
-        directUrl = transRes.data.url;
-      }
-    }
-
-    if (!directUrl) return fallbackToScdl();
-
-    // 2. Пытаемся стримить напрямую с Range (вдруг Render пропустит)
-    try {
-      const range = req.headers.range;
-      const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://soundcloud.com/',
-        'Origin': 'https://soundcloud.com',
-        'Accept': '*/*',
-        'Accept-Encoding': 'identity'
-      };
-      if (range) headers['Range'] = range;
-
-      const response = await axios.get(directUrl, { headers, responseType: 'stream', timeout: 10000 });
-      
-      if (response.status === 206 || response.status === 200) {
-        res.status(response.status);
-        if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
-        if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', 'audio/mpeg');
-        return response.data.pipe(res);
-      }
-    } catch (directErr) {
-      console.log('Прямой стриминг упал (IP заблокирован), переключаемся на прокси...');
-    }
-
-    // 3. Если IP заблокирован, используем прокси allorigins
-    try {
-      console.log('Стриминг через api.allorigins.win...');
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
-      const proxyRes = await axios.get(proxyUrl, { responseType: 'stream', timeout: 20000 });
-      
-      res.setHeader('Content-Type', 'audio/mpeg');
-      // Важно: allorigins отдает файл целиком, поэтому ползунок будет работать только после полной загрузки
-      return proxyRes.data.pipe(res);
-    } catch (proxyErr) {
-      console.log('Прокси allorigins не справился:', proxyErr.message);
-      return fallbackToScdl();
-    }
-
+    const stream = await scdl.download(trackUrl);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    stream.pipe(res);
   } catch (err) {
-    console.error('Критическая ошибка стриминга:', err.message);
-    return fallbackToScdl();
+    console.error('Ошибка стриминга:', err.message);
+    if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
 
