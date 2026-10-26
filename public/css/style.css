@@ -212,26 +212,25 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
 .toggle-auth a { color: var(--text-main); text-decoration: underline; }
 
 /* ==========================================
-   МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px)
+   МОБИЛЬНАЯ АДАПТАЦИЯ (<= 768px) - ИСПРАВЛЕНО
    ========================================== */
 @media (max-width: 768px) {
   body {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    height: 100dvh; /* Для современных мобильных браузеров */
     overflow: hidden;
     width: 100%;
     max-width: 100vw;
     overflow-x: hidden;
-    /* Отступ снизу для плеера, чтобы он не перекрывал контент */
-    padding-bottom: calc(70px + env(safe-area-inset-bottom)); 
+    padding-bottom: 75px; /* Отступ под плеер */
   }
 
-  /* --- ШАПКА --- */
+  /* --- ШАПКА (Используем CSS GRID для строгого порядка) --- */
   .sidebar {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 1fr auto; /* Левая колонка (лого) и правая (профиль) */
+    align-items: center;
     padding: 10px 15px;
     gap: 10px;
     background-color: var(--bg-sidebar);
@@ -240,24 +239,30 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     z-index: 10;
   }
 
-  /* Верхняя строка: Логотип + Профиль */
+  /* Строка 1: Логотип и Discord */
   .logo-wrapper {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    margin-bottom: 0;
-    padding-left: 0;
-  }
-
-  .sidebar .auth-container {
-    margin-left: auto;
+    gap: 8px;
+    margin: 0;
     padding: 0;
-    width: auto;
+  }
+  .logo { font-size: 20px; }
+  .discord-icon { width: 22px; height: 22px; }
+
+  /* Строка 1: Профиль и кнопка Выйти */
+  .sidebar .auth-container {
+    grid-column: 2;
+    grid-row: 1;
     display: flex;
     justify-content: flex-end;
+    margin: 0;
+    padding: 0;
+    width: auto;
   }
-  
+
   .sidebar .profile-info {
     display: flex;
     flex-direction: row;
@@ -267,18 +272,15 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     padding: 4px 10px;
     border-radius: 20px;
     border: 1px solid #333;
-    max-width: 100%;
   }
-  
   .sidebar .profile-info span {
     font-size: 12px;
-    max-width: 80px;
+    max-width: 70px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     margin-bottom: 0;
   }
-  
   .sidebar .btn-logout {
     width: auto;
     background: transparent;
@@ -288,59 +290,37 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     border: none;
   }
 
-  /* Навигация (Главная, Поиск, Волна и т.д.) */
+  /* Строка 2: Навигация */
   .sidebar nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
     width: 100%;
     margin-top: 5px;
     position: relative;
   }
-
-  /* Тень-градиент справа, чтобы было видно, что меню скроллится */
+  /* Тень для понимания скролла */
   .sidebar nav::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 25px;
-    background: linear-gradient(to right, transparent, #000);
-    pointer-events: none;
-    z-index: 2;
+    content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 25px;
+    background: linear-gradient(to right, transparent, #000); pointer-events: none;
   }
-
   .sidebar nav ul {
-    display: flex;
-    flex-direction: row;
-    gap: 6px;
-    overflow-x: auto;
-    padding-bottom: 5px;
-    padding-right: 20px;
-    scrollbar-width: none;
+    display: flex; flex-direction: row; gap: 6px; overflow-x: auto; padding-bottom: 5px; scrollbar-width: none;
   }
   .sidebar nav ul::-webkit-scrollbar { display: none; }
-
   .sidebar nav li {
-    flex-shrink: 0; /* Кнопки не сжимаются, а уходят в скролл */
-    padding: 6px 14px;
-    font-size: 13px;
-    background-color: #242424;
-    border-radius: 20px;
-    color: var(--text-muted);
+    flex-shrink: 0; padding: 6px 14px; font-size: 13px; background-color: #242424; border-radius: 20px; color: var(--text-muted);
   }
-  
-  .sidebar nav li.active {
-    background-color: var(--accent);
-    color: #000;
-    font-weight: bold;
-  }
+  .sidebar nav li.active { background-color: var(--accent); color: #000; font-weight: bold; }
 
-  /* Кнопка Импорта (делаем аккуратной) */
+  /* Строка 3: Кнопка Импорт (маленькая, слева) */
   #import-btn {
-    width: 100%;
-    margin: 5px 0 0 0;
-    padding: 8px;
-    font-size: 13px;
-    border-radius: 8px;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    width: max-content;
+    margin: 0;
+    padding: 6px 15px;
+    font-size: 12px;
+    border-radius: 20px;
   }
 
   /* --- КОНТЕНТ --- */
@@ -351,7 +331,6 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     overflow-x: hidden;
     width: 100%;
   }
-
   .content-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 15px; }
   .content-header h1 { font-size: 22px; }
   .search-box { width: 100%; }
@@ -365,15 +344,13 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
   .track-duration { display: none; }
   .btn-like, .btn-delete { font-size: 18px; padding: 0 4px; }
 
-  /* --- ПЛЕЕР --- */
+  /* --- ПЛЕЕР (Не перекрывает кнопки телефона) --- */
   .player {
     position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
+    bottom: 0; left: 0; width: 100vw;
     height: calc(70px + env(safe-area-inset-bottom));
     padding: 8px 12px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom)); /* Учитываем кнопки телефона */
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
     background-color: var(--bg-surface);
     border-top: 1px solid var(--border-color);
     z-index: 100;
@@ -382,24 +359,18 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     align-items: center;
     justify-content: space-between;
     box-sizing: border-box;
-    transform: translateY(100%);
-    transition: transform 0.3s ease;
   }
-
-  .player:not(.hidden) { transform: translateY(0); }
-  .player.hidden { display: flex !important; transform: translateY(100%); }
-
   .player-track-info { flex: 1; min-width: 0; }
   .player-cover { width: 40px; height: 40px; }
   .player-title { font-size: 13px; }
   .player-artist { font-size: 11px; }
 
-  .player-controls { flex-direction: row; width: auto; gap: 15px; }
+  .player-controls { flex-direction: row; width: auto; gap: 10px; flex-shrink: 0; }
   .player-progress { display: none; }
   
-  .player-volume { display: flex; width: 50px; gap: 0; }
+  .player-volume { display: flex; width: 50px; flex-shrink: 0; }
   .player-volume span, #volume-label { display: none; }
-  .player-volume input { width: 50px; height: 4px; }
+  .player-volume input { width: 45px; height: 4px; }
 
   .modal-content { width: 90%; padding: 20px; }
 }
