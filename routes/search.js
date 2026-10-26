@@ -19,7 +19,7 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// Вспомогательная функция поиска в SoundCloud
+// Вспомогательная функция поиска
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
@@ -205,36 +205,32 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (С защитой от блокировки IP)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Стабильный парсинг HTML страницы лайков)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
-  // Очищаем ссылку
+  // Очищаем ссылку от трекинга и окончания /likes
   url = url.split('?')[0].replace(/\/$/, '').replace('/likes', '');
   
   try {
-    // 1. Расшифровка короткой ссылки
+    // 1. Пытаемся расшифровать короткую ссылку через oembed
     if (url.includes('on.soundcloud.com')) {
       try {
         const oembed = await axios.get(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`, { timeout: 5000 });
         if (oembed.data && oembed.data.url) url = oembed.data.url.split('?')[0].replace(/\/$/, '');
       } catch (e) {
-        try {
-          const redirect = await axios.get(url, { maxRedirects: 0, validateStatus: () => true, headers: { 'User-Agent': 'Mozilla/5.0' } });
-          if (redirect.headers.location) url = redirect.headers.location.split('?')[0].replace(/\/$/, '');
-        } catch (err) {}
+        return res.status(400).json({ error: 'Не удалось расшифровать короткую ссылку. Пожалуйста, откройте её в браузере и скопируйте полную ссылку (вида soundcloud.com/username).' });
       }
     }
 
-    // Если ссылка всё ещё короткая — выдаем ошибку 400 (а не 500)
     if (url.includes('on.soundcloud.com')) {
-      return res.status(400).json({ error: 'Не удалось расшифровать короткую ссылку SoundCloud.' });
+      return res.status(400).json({ error: 'Не удалось расшифровать короткую ссылку. Используйте полную ссылку.' });
     }
 
     let tracks = [];
 
-    // 2. Плейлист
+    // 2. Если это плейлист
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
       tracks = playlist.tracks.map(track => {
@@ -250,7 +246,7 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks });
     }
 
-    // 3. Одиночный трек
+    // 3. Если это одиночный трек
     const parts = url.replace('https://soundcloud.com/', '').split('/');
     if (parts.length >= 2) {
       const info = await scdl.getInfo(url);
@@ -263,46 +259,54 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks });
     }
 
-    // 4. Профиль (Лайки) — используем прокси для обхода блокировки IP на Render
+    // 4. Профиль (Парсим страницу /likes напрямую)
     const username = parts[0];
+    console.log(`[SoundCloud] Загрузка лайков профиля: ${username}`);
     
-    // Запрашиваем страницу профиля через прокси codetabs, чтобы получить client_id
-    const profileUrl = `https://soundcloud.com/${username}`;
-    const proxyProfileUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(profileUrl)}`;
-    const profileRes = await axios.get(proxyProfileUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    // Запрашиваем страницу лайков через прокси (чтобы Render не заблокировали)
+    const likesPageUrl = `https://soundcloud.com/${username}/likes`;
+    let html = '';
     
-    const clientIdMatch = profileRes.data.match(/client_id:"(.*?)"/);
-    
-    if (clientIdMatch) {
-      const clientId = clientIdMatch[1];
-      
-      // Запрашиваем ID пользователя через прокси
-      const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(profileUrl)}&client_id=${clientId}`;
-      const userRes = await axios.get(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(resolveUrl)}`);
-      
-      // Запрашиваем лайки через прокси
-      const likesUrl = `https://api-v2.soundcloud.com/users/${userRes.data.id}/likes?client_id=${clientId}&limit=100`;
-      const likesRes = await axios.get(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(likesUrl)}`);
-      
-      const rawTracks = likesRes.data.collection.map(item => item.track || item);
-      tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => {
-        let cover = track.artwork_url || (track.user && track.user.avatar_url);
-        if (cover) cover = cover.replace('large', 't500x500');
-        return {
-          id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
-          cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-          duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
-          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
-        };
-      });
-      return res.json({ tracks });
-    } else {
-      throw new Error('Не удалось получить Client ID профиля');
+    try {
+      const proxyRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(likesPageUrl)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 });
+      html = proxyRes.data;
+    } catch (e) {
+      // Если allorigins упал, пробуем codetabs
+      const proxyRes = await axios.get(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(likesPageUrl)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 });
+      html = proxyRes.data;
     }
+
+    // Ищем встроенный JSON с данными SoundCloud
+    const match = html.match(/window\.__sc_hydration\s*=\s*(\[.*?\]);/);
+    if (!match) {
+      throw new Error('Не удалось найти данные на странице профиля (возможно, Cloudflare заблокировал)');
+    }
+
+    const hydration = JSON.parse(match[1]);
+    const likesData = hydration.find(item => item.hydratable === 'likes');
+    
+    if (!likesData || !likesData.data || !likesData.data.collection) {
+      throw new Error('Лайки не найдены (возможно, профиль пуст или закрыт)');
+    }
+
+    const rawTracks = likesData.data.collection.map(item => item.track || item);
+    
+    tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => {
+      let cover = track.artwork_url || (track.user && track.user.avatar_url);
+      if (cover) cover = cover.replace('large', 't500x500');
+      return {
+        id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
+        cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
+        duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
+        stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
+      };
+    });
+
+    res.json({ tracks });
 
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    res.status(500).json({ error: 'Ошибка импорта. Возможно, профиль закрыт или SoundCloud блокирует сервер.' }); 
+    res.status(500).json({ error: 'Ошибка импорта. SoundCloud заблокировал запрос или профиль скрыт.' }); 
   }
 });
 
