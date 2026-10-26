@@ -206,96 +206,91 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (через прокси и без прямых запросов к HTML)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Парсинг HTML через прокси без API)
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
 
-  // 1. АВТОМАТИЧЕСКАЯ ОЧИСТКА ССЫЛКИ
+  // Автоматическая очистка ссылки от ?utm и /likes
   let url = rawUrl.split('?')[0].split('#')[0].replace(/\/$/, '');
+  url = url.replace('/likes', '');
 
   try {
-    // 2. РАСШИФРОВКА КОРОТКИХ ССЫЛОК
+    // 1. Расшифровка коротких ссылок
     if (url.includes('on.soundcloud.com')) {
-      let resolved = false;
       try {
-        const oembed = await axios.get(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`, { timeout: 5000 });
-        if (oembed.data && oembed.data.url) {
-          url = oembed.data.url.split('?')[0].replace(/\/$/, '');
-          resolved = true;
+        const info = await scdl.getInfo(url);
+        if (info && info.permalink_url) {
+          url = info.permalink_url.split('?')[0].replace(/\/$/, '');
         }
-      } catch (e) {}
-
-      if (!resolved) {
-        try {
-          const info = await scdl.getInfo(url);
-          if (info && info.permalink_url) {
-            url = info.permalink_url.split('?')[0].replace(/\/$/, '');
-            resolved = true;
-          }
-        } catch (e) {}
-      }
-
-      if (!resolved) {
-        return res.status(400).json({ error: 'Не удалось открыть короткую ссылку. Скопируйте полную ссылку из браузера.' });
+      } catch (e) {
+        return res.status(400).json({ error: 'Не удалось открыть короткую ссылку. Скопируйте полную ссылку профиля.' });
       }
     }
 
-    // 3. УБИРАЕМ /likes ИЗ КОНЦА
-    url = url.replace('/likes', '');
-
-    // 4. ПЛЕЙЛИСТ
+    // 2. Плейлист
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
       const tracks = playlist.tracks.map(track => formatTrack(track));
       return res.json({ tracks });
     }
 
-    // 5. ОДИНОЧНЫЙ ТРЕК
+    // 3. Одиночный трек
     const parts = url.replace('https://soundcloud.com/', '').replace('http://soundcloud.com/', '').split('/');
     if (parts.length >= 2) {
       const info = await scdl.getInfo(url);
       return res.json({ tracks: [formatTrack(info)] });
     }
 
-    // 6. ПРОФИЛЬ (Пытаемся вытащить ЛАЙКИ через API и прокси)
+    // 4. Профиль (Парсинг HTML лайков через прокси)
     const username = parts[0];
+    const likesUrl = `https://soundcloud.com/${username}/likes`;
     
-    // Берем client_id из библиотеки scdl (он уже инициализирован)
-    // Если его нет, делаем фиктивный поиск, чтобы scdl его обновил
-    if (!scdl.client_id) {
-      await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
-    }
-    
-    const clientId = scdl.client_id;
-    if (!clientId) {
-      return res.status(400).json({ error: 'SoundCloud временно заблокировал доступ к API. Попробуйте позже.' });
+    // Список прокси для обхода блокировки Cloudflare на Render
+    const proxies = [
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(likesUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(likesUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(likesUrl)}`
+    ];
+
+    let rawTracks = null;
+
+    for (const proxy of proxies) {
+      try {
+        const proxyRes = await axios.get(proxy, { 
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }, 
+          timeout: 10000 
+        });
+        
+        const html = proxyRes.data;
+        
+        // Извлекаем скрытый JSON со страницы (hydratable data)
+        const match = html.match(/window\.__sc_hydration\s*=\s*(\[.*?\]);/);
+        if (match) {
+          const hydration = JSON.parse(match[1]);
+          const likesData = hydration.find(item => item.hydratable === 'likes');
+          
+          if (likesData && likesData.data && likesData.data.collection) {
+            rawTracks = likesData.data.collection.map(item => item.track || item).filter(Boolean);
+            break; // Если сработало, выходим из цикла
+          }
+        }
+      } catch (e) {
+        console.log(`[SoundCloud Proxy Fail] ${proxy.substring(0, 30)}...`);
+      }
     }
 
-    // Запрашиваем ID пользователя и его лайки через бесплатный прокси allorigins
-    const resolveUrl = `https://api-v2.soundcloud.com/resolve?url=https://soundcloud.com/${username}&client_id=${clientId}`;
-    const userRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(resolveUrl)}`, { timeout: 10000 });
-    
-    if (!userRes.data || !userRes.data.id) {
-      return res.status(400).json({ error: 'Не удалось найти пользователя. Проверьте никнейм.' });
+    if (!rawTracks) {
+      throw new Error('Не удалось получить лайки. Cloudflare блокирует все прокси.');
     }
 
-    const likesUrl = `https://api-v2.soundcloud.com/users/${userRes.data.id}/likes?client_id=${clientId}&limit=100`;
-    const likesRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(likesUrl)}`, { timeout: 10000 });
-    
-    if (!likesRes.data || !likesRes.data.collection) {
-      return res.status(400).json({ error: 'Лайки не найдены или профиль закрыт.' });
-    }
-
-    const rawTracks = likesRes.data.collection.map(item => item.track || item);
     const tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => formatTrack(track));
-
     res.json({ tracks });
 
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    // Возвращаем 400, чтобы фронтенд показал текст, а не 500 ошибку
-    res.status(400).json({ error: 'SoundCloud блокирует запросы с сервера (Cloudflare). Используйте импорт текстом.' }); 
+    // Отдаем 400, чтобы фронтенд показал понятную ошибку
+    res.status(400).json({ error: 'SoundCloud заблокировал запрос. Используйте импорт текстом.' }); 
   }
 });
 
