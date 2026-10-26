@@ -19,6 +19,22 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
+// Получаем актуальный Client ID от SoundCloud
+async function getClientId() {
+  try {
+    const res = await axios.get('https://soundcloud.com/', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    const match = res.data.match(/client_id:"(.*?)"/);
+    if (match) return match[1];
+    const match2 = res.data.match(/client_id=([a-zA-Z0-9]+)/);
+    if (match2) return match2[1];
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Вспомогательная функция поиска в SoundCloud
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
@@ -26,7 +42,7 @@ async function searchSoundCloud(q, offset = 0) {
   });
 
   return searchResult.collection
-    .filter(track => track.duration < 900000) // Только до 15 минут
+    .filter(track => track.duration < 900000)
     .map(track => {
       let cover = track.artwork_url || (track.user && track.user.avatar_url);
       if (cover) cover = cover.replace('large', 't500x500');
@@ -103,7 +119,7 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна (Умная)
+// 5. Моя волна
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
@@ -157,7 +173,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
   }
 });
 
-// 6. История прослушиваний
+// 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
@@ -173,7 +189,7 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// 7. Статистика профиля
+// 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const totalTime = await query(
@@ -205,83 +221,86 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Универсальный: короткие ссылки, плейлисты, профили)
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (Истинные лайки через API v2)
 router.get('/import-likes', async (req, res) => {
   let url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Ссылка не передана' });
   
-  // Очищаем от параметров
   url = url.split('?')[0].replace(/\/$/, '');
   
   try {
-    // 1. Расшифровка короткой ссылки (on.soundcloud.com)
+    // Расшифровка короткой ссылки
     if (url.includes('on.soundcloud.com')) {
       try {
-        const redirect = await axios.get(url, { maxRedirects: 0, validateStatus: () => true, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        if (redirect.headers.location) {
-          url = redirect.headers.location.split('?')[0].replace(/\/$/, '');
-        }
+        const oembed = await axios.get(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`, { timeout: 5000 });
+        if (oembed.data && oembed.data.url) url = oembed.data.url.split('?')[0].replace(/\/$/, '');
       } catch (e) {
-        // Если редирект не сработал, пробуем oembed
-        try {
-          const oembed = await axios.get(`https://soundcloud.com/oembed?url=${encodeURIComponent(url)}&format=json`);
-          if (oembed.data && oembed.data.url) url = oembed.data.url.split('?')[0].replace(/\/$/, '');
-        } catch (err) {}
+        const redirect = await axios.get(url, { maxRedirects: 0, validateStatus: () => true, headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (redirect.headers.location) url = redirect.headers.location.split('?')[0].replace(/\/$/, '');
       }
     }
 
-    let tracks = [];
-
-    // 2. Если это плейлист (/sets/)
+    // Плейлист
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
-      tracks = playlist.tracks.map(track => {
-        let cover = track.artwork_url || (track.user && track.user.avatar_url);
-        if (cover) cover = cover.replace('large', 't500x500');
-        return {
-          id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
-          cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-          duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
-          stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
-        };
-      });
+      const tracks = playlist.tracks.map(track => ({
+        id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
+        cover_url: track.artwork_url ? track.artwork_url.replace('large', 't500x500') : null,
+        duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
+        stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
+      }));
       return res.json({ tracks });
     }
 
-    // 3. Если это одиночный трек (есть слэш и это не просто имя юзера)
+    // Одиночный трек
     const parts = url.replace('https://soundcloud.com/', '').split('/');
     if (parts.length >= 2 && !url.includes('/likes')) {
       const info = await scdl.getInfo(url);
-      tracks = [{
+      const track = {
         id: info.id, title: info.title, artist_name: info.user.username,
         cover_url: info.artwork_url ? info.artwork_url.replace('large', 't500x500') : null,
         duration: Math.round(info.duration / 1000), permalink_url: info.permalink_url,
         stream_url: `/api/search/stream?url=${encodeURIComponent(info.permalink_url)}`, is_external: false
-      }];
-      return res.json({ tracks });
+      };
+      return res.json({ tracks: [track] });
     }
 
-    // 4. Если это профиль — ищем треки по имени пользователя
+    // Профиль (Лайки)
     const username = parts[0];
-    tracks = await searchSoundCloud(username);
+    const clientId = await getClientId();
+    if (!clientId) throw new Error('Не удалось получить Client ID');
+
+    // 1. Получаем ID пользователя
+    const userRes = await axios.get(`https://api-v2.soundcloud.com/resolve?url=https://soundcloud.com/${username}&client_id=${clientId}`);
+    const userId = userRes.data.id;
+
+    // 2. Запрашиваем его лайки (до 100 штук)
+    const likesRes = await axios.get(`https://api-v2.soundcloud.com/users/${userId}/likes?client_id=${clientId}&limit=100`);
+    const rawTracks = likesRes.data.collection.map(item => item.track || item);
+
+    const tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => ({
+      id: track.id, title: track.title, artist_name: track.user ? track.user.username : 'Неизвестен',
+      cover_url: track.artwork_url ? track.artwork_url.replace('large', 't500x500') : null,
+      duration: Math.round(track.duration / 1000), permalink_url: track.permalink_url,
+      stream_url: `/api/search/stream?url=${encodeURIComponent(track.permalink_url)}`, is_external: false
+    }));
+
     res.json({ tracks });
 
   } catch (err) { 
-    console.error('Ошибка импорта SoundCloud:', err);
-    res.status(500).json({ error: 'Ошибка импорта. Проверьте ссылку.' }); 
+    console.error('Ошибка импорта SoundCloud:', err.message);
+    res.status(500).json({ error: 'Ошибка импорта. Убедитесь, что профиль открыт для всех.' }); 
   }
 });
 
-// 9. ИМПОРТ ИЗ ЯНДЕКС.МУЗЫКИ (через прокси)
+// 9. ИМПОРТ ИЗ ЯНДЕКСА (через прокси)
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
-  if (!url || !url.includes('music.yandex.ru')) {
-    return res.status(400).json({ error: 'Ссылка должна быть с music.yandex.ru' });
-  }
+  if (!url || !url.includes('music.yandex.ru')) return res.status(400).json({ error: 'Ссылка не с Яндекса' });
 
   let parsedTracks = [];
-
   let apiUrl = null;
+  
   if (url.includes('/users/')) {
     const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
     if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${match[1]}&kinds=${match[2]}&lang=ru`;
@@ -323,9 +342,7 @@ router.get('/import-yandex', async (req, res) => {
     } catch (err) {}
   }
 
-  if (parsedTracks.length === 0) {
-    return res.status(404).json({ error: 'Яндекс блокирует запросы с сервера. Пожалуйста, используйте вставку текстом.' });
-  }
+  if (parsedTracks.length === 0) return res.status(404).json({ error: 'Яндекс блокирует запросы. Используйте текст.' });
 
   const tracks = [];
   for (const track of parsedTracks) {
@@ -337,17 +354,14 @@ router.get('/import-yandex', async (req, res) => {
     } catch (e) {}
   }
 
-  if (tracks.length === 0) {
-    return res.status(404).json({ error: `Найдено ${parsedTracks.length} треков, но ни один не найден в SoundCloud.` });
-  }
-
+  if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено в SoundCloud.' });
   res.json({ tracks });
 });
 
 // 10. ИМПОРТ ИЗ ТЕКСТА
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
-  if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список треков' });
+  if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список' });
 
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 3);
   const tracks = [];
@@ -359,10 +373,7 @@ router.post('/import-text', async (req, res) => {
     } catch (e) {}
   }
 
-  if (tracks.length === 0) {
-    return res.status(404).json({ error: 'Ничего не найдено в SoundCloud. Проверьте формат: Артист - Название' });
-  }
-
+  if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено. Формат: Артист - Название' });
   res.json({ tracks });
 });
 
