@@ -206,7 +206,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD
+// 8. ИМПОРТ ИЗ SOUNDCLOUD (С пагинацией и загрузкой до 100 треков)
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -238,60 +238,80 @@ router.get('/import-likes', async (req, res) => {
       return res.json({ tracks: [formatTrack(info)] });
     }
 
-    // ПРОФИЛЬ (Лайки) - Экстракция ссылок через Jina AI
+    // ПРОФИЛЬ (Лайки) - Загружаем несколько страниц
     const username = parts[0];
-    console.log(`[SoundCloud Import] Запуск извлечения лайков для: ${username}`);
-    
-    let tracks = [];
-    
-    try {
-      // 1. Запрашиваем страницу лайков через Jina AI (обходит Cloudflare)
-      const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
-      console.log(`[SoundCloud Import] Запрос к Jina AI...`);
-      
-      const jinaRes = await axios.get(jinaUrl, { 
-        headers: { 'Accept': 'text/plain' }, 
-        timeout: 20000 
-      });
-      
-      const text = jinaRes.data;
-      
-      // 2. Ищем все ссылки на треки в тексте
-      const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
-      
-      // 3. Очищаем от дублей и отсеиваем системные страницы (лайки, плейлисты)
-      const trackUrls = [...new Set(urlMatches)].filter(u => {
-        const p = u.replace('https://soundcloud.com/', '').split('/');
-        return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
-      });
-      
-      console.log(`[SoundCloud Import] Jina AI нашел ${trackUrls.length} ссылок на треки`);
+    const likesUrl = `https://soundcloud.com/${username}/likes`;
+    let clientId = null;
+    let collection = [];
 
-      if (trackUrls.length > 0) {
-        // 4. Получаем информацию о каждом треке (ограничиваем до 40, чтобы не было таймаута)
-        for (const trackUrl of trackUrls.slice(0, 40)) {
-          try {
-            const info = await scdl.getInfo(trackUrl);
-            tracks.push(formatTrack(info));
-          } catch (e) {
-            // Если один трек не удалось загрузить, просто пропускаем его
-          }
+    // 1. Получаем первую страницу через прокси
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(likesUrl)}`,
+      `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(likesUrl)}`
+    ];
+
+    let html = '';
+    for (const proxy of proxies) {
+      try {
+        const res = await axios.get(proxy, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 });
+        if (res.data && typeof res.data === 'string' && res.data.includes('window.__sc_hydration')) {
+          html = res.data;
+          break;
         }
-      }
-    } catch (jinaErr) {
-      console.log(`[SoundCloud Import] Ошибка Jina AI: ${jinaErr.message}`);
+      } catch (e) {}
     }
 
-    if (tracks.length > 0) {
-      console.log(`[SoundCloud Import] Успешно импортировано ${tracks.length} треков!`);
-      return res.json({ tracks });
-    } else {
-      throw new Error('Не удалось найти треки (страница пуста или заблокирована)');
+    if (!html) throw new Error('Не удалось получить страницу профиля');
+
+    // Извлекаем client_id для следующих страниц
+    const clientIdMatch = html.match(/client_id:"(.*?)"/);
+    if (clientIdMatch) clientId = clientIdMatch[1];
+
+    // Извлекаем JSON первой страницы
+    const startStr = 'window.__sc_hydration = ';
+    const startIndex = html.indexOf(startStr);
+    const endIndex = html.indexOf('</script>', startIndex);
+    let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
+    if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
+
+    const hydration = JSON.parse(jsonStr);
+    const likesData = hydration.find(item => item.hydratable === 'likes');
+    
+    if (likesData && likesData.data && likesData.data.collection) {
+      collection = collection.concat(likesData.data.collection);
     }
+
+    // 2. Загружаем остальные страницы (до 100 треков)
+    let nextHref = likesData?.data?.next_href;
+    
+    while (nextHref && collection.length < 100) {
+      if (clientId && !nextHref.includes('client_id=')) {
+        nextHref += `&client_id=${clientId}`;
+      }
+      
+      try {
+        const nextRes = await axios.get(`https://api.allorigins.win/raw?url=${encodeURIComponent(nextHref)}`, { timeout: 10000 });
+        if (nextRes.data && nextRes.data.collection) {
+          collection = collection.concat(nextRes.data.collection);
+          nextHref = nextRes.data.next_href; // Ссылка на следующую страницу
+        } else {
+          break;
+        }
+      } catch (e) {
+        console.log('Ошибка пагинации:', e.message);
+        break; // Если прокси не справился, отдаем то, что уже собрали
+      }
+    }
+
+    // Форматируем все собранные треки
+    const rawTracks = collection.map(item => item.track || item).filter(Boolean);
+    const tracks = rawTracks.filter(t => t && t.duration < 900000).map(track => formatTrack(track));
+
+    return res.json({ tracks });
 
   } catch (err) { 
     console.error('Ошибка импорта SoundCloud:', err.message);
-    res.status(400).json({ error: 'SoundCloud заблокировал все запросы с сервера. Пожалуйста, скопируйте названия треков и вставьте их в поле ниже.' }); 
+    res.status(400).json({ error: 'SoundCloud заблокировал запрос. Используйте импорт текстом.' }); 
   }
 });
 
@@ -313,6 +333,7 @@ router.get('/import-yandex', async (req, res) => {
 
   if (apiUrl) {
     const PROXIES = [
+      `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(apiUrl)}`,
       `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`
     ];
 
