@@ -401,26 +401,38 @@ function renderSearchResults(tracks, albums) {
   }
 }
 
-// Функция загрузки треков из альбома (С увеличенным таймаутом)
+// Функция загрузки треков из альбома (ИСПРАВЛЕНА КНОПКА НАЗАД)
 async function loadAlbum(albumUrl) {
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка альбома... (это может занять 10-15 сек)</p>';
+  if (!albumUrl || albumUrl === 'undefined') {
+    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка: неверная ссылка.</p>';
+    return;
+  }
+  
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка альбома...</p>';
+  
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 секунд
-
-    const res = await fetch(`/api/search/album?url=${encodeURIComponent(albumUrl)}`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-
+    const res = await fetch(`/api/search/album?url=${encodeURIComponent(albumUrl)}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
 
-    trackListEl.innerHTML = `<button id="btn-back-search" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад к поиску</button>`;
+    if (!res.ok) throw new Error(data.error);
+    if (!data.tracks || data.tracks.length === 0) {
+      trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">В этом альбоме нет доступных треков.</p>';
+      return;
+    }
+
+    // Сначала отрисовываем треки (это очищает список)
     renderTracks(data.tracks);
     
+    // Затем ДОБАВЛЯЕМ кнопку "Назад" в самое начало списка, чтобы её не стерло
+    const backBtnHTML = `<button id="btn-back-search" style="margin-bottom: 20px; padding: 8px 16px; background: #282828; color: white; border: none; border-radius: 8px; cursor: pointer;">← Назад к поиску</button>`;
+    trackListEl.insertAdjacentHTML('afterbegin', backBtnHTML);
+    
+    // Вешаем обработчик
     document.getElementById('btn-back-search').addEventListener('click', () => performSearch(lastSearchQuery));
+    
   } catch (err) {
     console.error('Ошибка загрузки альбома:', err);
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки альбома.</p>';
+    trackListEl.innerHTML = `<p style="color:red; text-align:center; margin-top:40px;">${err.message}</p>`;
   }
 }
 
@@ -828,7 +840,7 @@ const btnBackToLogin = document.getElementById('btn-back-to-login');
 const btnSendCode = document.getElementById('btn-send-code');
 const resetStep2 = document.getElementById('reset-step-2');
 const btnConfirmReset = document.getElementById('btn-confirm-reset');
-const authFormContainer = document.getElementById('auth-login-block'); // Обертка формы
+const authFormContainer = document.getElementById('auth-login-block');
 
 if (btnForgot) {
   btnForgot.addEventListener('click', (e) => {
