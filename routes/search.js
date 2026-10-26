@@ -19,6 +19,7 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
+// Вспомогательная функция форматирования трека
 function formatTrack(track) {
   if (!track) return null;
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
@@ -35,6 +36,7 @@ function formatTrack(track) {
   };
 }
 
+// Вспомогательная функция поиска
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
@@ -73,7 +75,7 @@ router.get('/', async (req, res) => {
     ]);
 
     const albums = playlistsRes.collection
-      .filter(pl => pl.permalink_url)
+      .filter(pl => pl.permalink_url) // Защита от битых ссылок
       .map(pl => {
         let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
         if (cover) cover = cover.replace('large', 't500x500');
@@ -94,14 +96,14 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2.1. Загрузка треков конкретного альбома
+// 2.1. Загрузка треков конкретного альбома (Тройная защита)
 router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
     if (!albumUrl || albumUrl === 'undefined') return res.status(400).json({ error: 'URL не передан' });
     albumUrl = albumUrl.split('?')[0];
 
-    // Попытка 1: Стандартный метод
+    // Попытка 1: Стандартный метод scdl
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
       if (playlist && playlist.tracks && playlist.tracks.length > 0) {
@@ -112,10 +114,36 @@ router.get('/album', async (req, res) => {
       }
     } catch (e) {}
 
-    // Попытка 2: Jina AI
+    // Попытка 2: Jina AI HTML (парсим скрипты)
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
-      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
+      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' }, timeout: 15000 });
+      let html = jinaRes.data;
+      
+      if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
+          const startStr = 'window.__sc_hydration = ';
+          const startIndex = html.indexOf(startStr);
+          const endIndex = html.indexOf('</script>', startIndex);
+          let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
+          if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
+
+          const hydration = JSON.parse(jsonStr);
+          const playlistData = hydration.find(item => item.hydratable === 'playlist' || item.hydratable === 'playlistInfo');
+          
+          if (playlistData && playlistData.data) {
+              const tracksData = playlistData.data.tracks || (playlistData.data.playlist && playlistData.data.playlist.tracks);
+              if (tracksData) {
+                 const tracks = tracksData.filter(t => t && t.duration).map(track => formatTrack(track));
+                 return res.json({ tracks });
+              }
+          }
+      }
+    } catch (e) {}
+
+    // Попытка 3: Jina AI Text (ищем ссылки)
+    try {
+      const jinaUrl = `https://r.jina.ai/${albumUrl}`;
+      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 15000 });
       const text = jinaRes.data;
       
       const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
@@ -126,7 +154,7 @@ router.get('/album', async (req, res) => {
 
       if (trackUrls.length > 0) {
         const tracks = [];
-        for (const tUrl of trackUrls.slice(0, 30)) {
+        for (const tUrl of trackUrls) {
           try {
             const info = await scdl.getInfo(tUrl);
             const formatted = formatTrack(info);
@@ -137,7 +165,7 @@ router.get('/album', async (req, res) => {
       }
     } catch (e) {}
 
-    throw new Error('Не удалось найти треки в альбоме');
+    throw new Error('Все методы загрузки альбома исчерпаны');
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки альбома.' });
   }
@@ -436,36 +464,62 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг (ИСПРАВЛЕНА ПЕРЕМОТКА)
+// 12. Стриминг (Двойная защита: Перемотка или Запасной метод)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
 
-    const info = await scdl.getInfo(trackUrl);
-    
-    let streamUrl = info.stream_url; 
-    if (info.formats) {
-      const mp3Format = info.formats.find(f => f.preset && f.preset.includes('mp3'));
-      if (mp3Format) streamUrl = mp3Format.url;
+    // Попытка 1: Пытаемся получить прямой URL для поддержки перемотки (Range)
+    try {
+      const info = await scdl.getInfo(trackUrl);
+      let streamUrl = null;
+
+      if (info.media && info.media.transcodings) {
+        const progressive = info.media.transcodings.find(t => t.format.protocol === 'progressive');
+        if (progressive) {
+          if (!scdl.client_id) {
+            await scdl.search({ query: 'test', resourceType: 'tracks', limit: 1 }).catch(() => {});
+          }
+          const transUrl = `${progressive.url}?client_id=${scdl.client_id}`;
+          const transRes = await axios.get(transUrl);
+          streamUrl = transRes.data.url;
+        }
+      } else if (info.stream_url) {
+         streamUrl = info.stream_url;
+      }
+
+      if (streamUrl) {
+        const range = req.headers.range;
+        const headers = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer': 'https://soundcloud.com/',
+          'Origin': 'https://soundcloud.com'
+        };
+        if (range) headers['Range'] = range;
+
+        const response = await axios.get(streamUrl, { headers, responseType: 'stream' });
+        
+        res.status(response.status);
+        if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+        if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+        if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+        res.setHeader('Content-Type', 'audio/mpeg');
+
+        return response.data.pipe(res);
+      }
+    } catch (e) {
+      console.log('Прямой стриминг не удался, переключаемся на scdl.download:', e.message);
     }
 
-    if (!streamUrl) throw new Error('Не удалось получить ссылку на поток');
-
-    const range = req.headers.range;
-    const headers = { 'User-Agent': 'Mozilla/5.0' };
-    if (range) headers['Range'] = range;
-
-    const response = await axios.get(streamUrl, { headers, responseType: 'stream' });
-
-    res.status(response.status);
-    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
-    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
-    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+    // Попытка 2: Запасной вариант (гарантированно играет, но может сбрасывать ползунок)
+    console.log('Используем запасной метод scdl.download');
+    const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
+    stream.pipe(res);
 
-    response.data.pipe(res);
   } catch (err) {
+    console.error('Ошибка стриминга:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
