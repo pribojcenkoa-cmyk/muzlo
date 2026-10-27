@@ -46,18 +46,15 @@
       </div>
     </header>
 
-    <!-- АДМИН-ВИДЖЕТ (покажется только админу) -->
+    <!-- АДМИН-ВИДЖЕТ -->
     <div id="admin-widget" style="display: none; margin-bottom: 20px; padding: 15px 20px; background: linear-gradient(90deg, #1a3a24, #0f2815); border: 1px solid #1db954; border-radius: 12px; color: #fff; font-size: 14px;">
       <span style="color: #1db954; font-weight: 700;">● ADMIN</span>
       <span style="margin-left: 15px;">Онлайн: <b id="admin-online">0</b></span>
       <span style="margin-left: 15px;">Всего юзеров: <b id="admin-total">0</b></span>
       <span style="margin-left: 15px;">Прослушиваний за сутки: <b id="admin-plays">0</b></span>
-      
-      <!-- Кнопка для вывода списка всех юзеров -->
       <button id="btn-show-users" style="margin-left: 20px; padding: 5px 10px; background: #1db954; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: #000;">Показать всех юзеров</button>
     </div>
 
-    <!-- Блок со списком юзеров в админке (скрыт по умолчанию) -->
     <div id="admin-users-list" style="display: none; margin-bottom: 20px; padding: 15px; background: #181818; border-radius: 12px; color: #fff; font-size: 14px; max-height: 300px; overflow-y: auto;"></div>
 
     <div id="profile-stats" style="display: none; margin-bottom: 20px; padding: 20px; background: #181818; border-radius: 12px; color: #fff;"></div>
@@ -81,9 +78,10 @@
         <button id="btn-play" class="control-btn play-btn">▶</button>
         <button id="btn-next" class="control-btn">⏭</button>
       </div>
+      <!-- Ползунок перемотки убран. Оставлены только метки времени -->
       <div class="player-progress">
         <span id="current-time">0:00</span>
-        <input type="range" id="seek-slider" value="0" min="0" max="100" step="1">
+        <span style="color: #4d4d4d;">•</span>
         <span id="total-time">0:00</span>
       </div>
     </div>
@@ -95,7 +93,7 @@
     </div>
   </div>
 
-  <!-- ВАЖНО: Добавлен preload="auto" для быстрой загрузки -->
+  <!-- ВАЖНО: preload="auto" для быстрой загрузки -->
   <audio id="audio-player" preload="auto"></audio>
 
   <!-- Модальное окно авторизации -->
@@ -103,7 +101,6 @@
     <div class="modal-content">
       <span class="close-btn" id="btn-close-auth">&times;</span>
       
-      <!-- Блок входа/регистрации -->
       <div id="auth-login-block">
         <h2 id="modal-title">Вход</h2>
         <form id="auth-form">
@@ -117,13 +114,11 @@
           <a href="#" id="btn-toggle-auth">Зарегистрироваться</a>
         </p>
 
-        <!-- Ссылка "Забыли пароль?" -->
         <p style="text-align: center; margin-top: 10px;">
           <a href="#" id="btn-forgot-password" style="color: #b3b3b3; font-size: 14px; text-decoration: underline;">Забыли пароль?</a>
         </p>
       </div>
 
-      <!-- Блок сброса пароля (скрыт по умолчанию) -->
       <div id="reset-password-block" style="display: none;">
         <h2 style="text-align: center; margin-bottom: 20px;">Сброс пароля</h2>
         
@@ -131,7 +126,6 @@
         
         <button type="button" id="btn-send-code" class="btn-submit" style="width: 100%;">Получить код</button>
         
-        <!-- Шаг 2: Ввод кода и нового пароля (скрыт) -->
         <div id="reset-step-2" style="display: none; margin-top: 15px;">
           <input type="text" id="reset-code" placeholder="Код из письма" required class="auth-input">
           <input type="password" id="reset-new-password" placeholder="Новый пароль" required class="auth-input">

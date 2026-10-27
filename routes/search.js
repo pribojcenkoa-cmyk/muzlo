@@ -338,7 +338,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (Простой, мгновенный)
+// 12. СТРИМИНГ (простейший, мгновенный)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;

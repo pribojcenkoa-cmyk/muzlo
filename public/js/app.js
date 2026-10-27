@@ -17,7 +17,6 @@ const btnPrev = document.getElementById('btn-prev');
 const playerTitle = document.getElementById('player-title');
 const playerArtist = document.getElementById('player-artist');
 const playerCover = document.getElementById('player-cover');
-const seekSlider = document.getElementById('seek-slider');
 const volumeSlider = document.getElementById('volume-slider');
 const volumeLabel = document.getElementById('volume-label');
 const currentTimeEl = document.getElementById('current-time');
@@ -39,7 +38,6 @@ let currentTrackIndex = -1;
 let isPlaying = false;
 let isLoginMode = true;
 let currentTrackRealDuration = 0;
-let isSeeking = false;
 let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
@@ -540,15 +538,12 @@ function playTrack(track) {
 
   currentTrackRealDuration = track.duration || 0;
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
-  seekSlider.value = 0;
+  currentTimeEl.textContent = '0:00';
 
   btnPlay.textContent = '⏳'; 
   isPlaying = false;
 
-  const baseStreamUrl = getStreamUrl(track);
-  const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`;
-  
-  audioPlayer.src = streamUrlWithMeta;
+  audioPlayer.src = getStreamUrl(track);
   audioPlayer.load();
 
   audioPlayer.addEventListener('playing', () => {
@@ -586,7 +581,7 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // Предзагрузка следующего трека в браузере (для мгновенного скипа)
+  // Браузерная предзагрузка следующего трека
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -595,28 +590,11 @@ function playTrack(track) {
         hiddenPreloader = new Audio();
         hiddenPreloader.preload = 'auto';
       }
-      const nextUrlWithMeta = `${nextTrack.stream_url}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`;
-      hiddenPreloader.src = nextUrlWithMeta;
+      hiddenPreloader.src = nextTrack.stream_url;
       hiddenPreloader.load();
     }
   }
 }
-
-// Прогресс загрузки на кнопке Play
-audioPlayer.addEventListener('progress', () => {
-  if (!isPlaying && btnPlay.textContent.startsWith('⏳')) {
-    if (audioPlayer.buffered.length > 0) {
-      const bufferedEnd = audioPlayer.buffered.end(audioPlayer.buffered.length - 1);
-      const duration = audioPlayer.duration || currentTrackRealDuration;
-      if (duration > 0) {
-        const percent = Math.round((bufferedEnd / duration) * 100);
-        if (percent < 100) {
-          btnPlay.textContent = `⏳ ${percent}%`;
-        }
-      }
-    }
-  }
-});
 
 btnPlay.addEventListener('click', () => {
   if (!audioPlayer.src) return;
@@ -654,29 +632,15 @@ btnPrev.addEventListener('click', () => {
 
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
-  if (!duration || isNaN(duration)) return;
-  if (!isSeeking) seekSlider.value = (audioPlayer.currentTime / duration) * 100;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+  if (duration && !isNaN(duration)) {
+    totalTimeEl.textContent = formatTime(duration);
+  }
   if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
 
 audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
-});
-
-seekSlider.addEventListener('input', () => {
-  isSeeking = true;
-  const duration = currentTrackRealDuration || audioPlayer.duration;
-  if (!duration) return;
-  currentTimeEl.textContent = formatTime((seekSlider.value / 100) * duration);
-});
-
-seekSlider.addEventListener('change', () => {
-  isSeeking = false;
-  const duration = currentTrackRealDuration || audioPlayer.duration;
-  if (!duration) return;
-  audioPlayer.currentTime = (seekSlider.value / 100) * duration;
-  savePlayerState();
 });
 
 function updateVolume() {
