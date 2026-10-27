@@ -29,7 +29,7 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// ============ TELEGRAM ============
+// ============ TELEGRAM ХРАНИЛИЩЕ ============
 async function uploadToTelegram(filePath, trackTitle, artistName) {
   const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
   const TG_CHAT_ID = process.env.TG_CHAT_ID;
@@ -484,76 +484,57 @@ router.get('/precache', async (req, res) => {
   }
 });
 
-// 13. СТРИМИНГ (быстрый + обычный режим)
+// 13. СТРИМИНГ (Мгновенный + фоновое кэширование)
 router.get('/stream', async (req, res) => {
   const trackUrl = req.query.url;
   const trackTitle = req.query.title || 'Unknown';
   const trackArtist = req.query.artist || 'Unknown';
-  const quick = req.query.quick === '1';
   
   if (!trackUrl) return res.status(400).send('URL required');
 
   const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
   const filePath = path.join(TRACKS_DIR, safeFileName);
 
-  // 1. Файл есть на диске → мгновенный ответ (ползунок работает)
+  // 1. Файл уже на диске → sendFile (перемотка работает)
   if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
     return res.sendFile(filePath);
   }
 
-  // ============ БЫСТРЫЙ РЕЖИМ (скип) ============
-  if (quick) {
-    if (downloadLocks.has(trackUrl)) {
-      try {
-        await downloadLocks.get(trackUrl);
-        if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
-          return res.sendFile(filePath);
-        }
-      } catch (e) {}
-    }
-
-    try {
-      console.log(`[Stream] QUICK: ${trackUrl}`);
-      const stream = await scdl.download(trackUrl);
-      const writeStream = fs.createWriteStream(filePath);
-      
-      res.setHeader('Content-Type', 'audio/mpeg');
-      stream.pipe(res);
-      stream.pipe(writeStream);
-
-      const streamPromise = new Promise((resolve) => {
-        writeStream.on('finish', () => {
-          uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
-          resolve();
-        });
-        writeStream.on('error', () => resolve());
-        stream.on('error', () => resolve());
-      });
-      
-      downloadLocks.set(trackUrl, streamPromise);
-      streamPromise.finally(() => downloadLocks.delete(trackUrl));
-      return;
-    } catch (err) {
-      console.error(`[Stream] QUICK error: ${err.message}`);
-      if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
-      return;
-    }
-  }
-
-  // ============ ОБЫЧНЫЙ РЕЖИМ ============
+  // 2. Файл качается (precache) → ждём и отдаем (перемотка будет)
   if (downloadLocks.has(trackUrl)) {
     try {
       await downloadLocks.get(trackUrl);
-      if (fs.existsSync(filePath)) return res.sendFile(filePath);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
+        return res.sendFile(filePath);
+      }
     } catch (e) {}
   }
 
+  // 3. Мгновенный стрим + фоновая запись на диск
   try {
-    console.log(`[Stream] NORMAL: ${trackUrl}`);
-    await ensureTrackOnDisk(trackUrl, trackTitle, trackArtist);
-    return res.sendFile(filePath);
+    console.log(`[Stream] Direct: ${trackUrl}`);
+    const stream = await scdl.download(trackUrl);
+    
+    res.setHeader('Content-Type', 'audio/mpeg');
+    stream.pipe(res);
+    
+    const writeStream = fs.createWriteStream(filePath);
+    stream.pipe(writeStream);
+    
+    const lockPromise = new Promise((resolve) => {
+      writeStream.on('finish', () => {
+        uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
+        resolve();
+      });
+      writeStream.on('error', resolve);
+      stream.on('error', resolve);
+    });
+    
+    downloadLocks.set(trackUrl, lockPromise);
+    lockPromise.finally(() => downloadLocks.delete(trackUrl));
+
   } catch (err) {
-    console.error(`[Stream] NORMAL error: ${err.message}`);
+    console.error(`[Stream] Error: ${err.message}`);
     if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
   }
 });
