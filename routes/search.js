@@ -501,7 +501,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. ПРЕДЗАГРУЗКА (Pre-cache) для мгновенного переключения
+// 12. ПРЕДЗАГРУЗКА (Pre-cache)
 router.get('/precache', async (req, res) => {
   const trackUrl = req.query.url;
   if (!trackUrl) return res.status(400).send('URL required');
@@ -541,7 +541,7 @@ router.get('/precache', async (req, res) => {
   }
 });
 
-// 13. СТРИМИНГ
+// 13. СТРИМИНГ (Мгновенный старт + фоновое кэширование)
 router.get('/stream', async (req, res) => {
   const trackUrl = req.query.url;
   if (!trackUrl) return res.status(400).send('URL required');
@@ -549,10 +549,12 @@ router.get('/stream', async (req, res) => {
   const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
   const filePath = path.join(TRACKS_DIR, safeFileName);
 
+  // 1. Если файл уже на диске - отдаем мгновенно (с перемоткой)
   if (fs.existsSync(filePath)) {
     return res.sendFile(filePath);
   }
 
+  // 2. Если файла нет, но он есть в Telegram - скачиваем и отдаем
   try {
     const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
     if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
@@ -566,26 +568,32 @@ router.get('/stream', async (req, res) => {
     }
   } catch (e) {}
 
+  // 3. МГНОВЕННЫЙ СТАРТ: Скачиваем с SoundCloud, сразу отдаем в браузер и сохраняем в фон
   try {
+    console.log(`[Stream] Мгновенный старт: ${trackUrl}`);
     const stream = await scdl.download(trackUrl);
     const writeStream = fs.createWriteStream(filePath);
+
+    // Отдаем поток в браузер (играет сразу)
+    res.setHeader('Content-Type', 'audio/mpeg');
+    stream.pipe(res);
+
+    // Одновременно пишем на диск для будущего кэша
     stream.pipe(writeStream);
 
-    await new Promise((resolve, reject) => {
-      writeStream.on('finish', resolve);
-      writeStream.on('error', reject);
+    // Когда файл скачается до конца, отправляем его в Telegram
+    writeStream.on('finish', async () => {
+      try {
+        const trackInfo = await scdl.getInfo(trackUrl).catch(() => ({}));
+        const fileId = await uploadToTelegram(filePath, trackInfo.title, trackInfo.user?.username);
+        await query(
+          'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
+          [trackUrl, fileId]
+        );
+        console.log(`[Stream] Фоновое сохранение в TG завершено`);
+      } catch (tgErr) {}
     });
 
-    try {
-      const trackInfo = await scdl.getInfo(trackUrl).catch(() => ({}));
-      const fileId = await uploadToTelegram(filePath, trackInfo.title, trackInfo.user?.username);
-      await query(
-        'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
-        [trackUrl, fileId]
-      );
-    } catch (tgErr) {}
-
-    return res.sendFile(filePath);
   } catch (err) {
     if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
   }
