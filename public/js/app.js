@@ -44,6 +44,7 @@ let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
+let hiddenPreloader = null; // Скрытый плеер для предзагрузки
 
 // Web Audio API
 let audioContext = null;
@@ -512,7 +513,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (С индикатором загрузки и предзагрузкой)
+// 6. ВОСПРОИЗВЕДЕНИЕ (Мгновенный старт + предзагрузка)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -538,14 +539,16 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  // Включаем индикатор загрузки
   btnPlay.textContent = '⏳'; 
   isPlaying = false;
 
-  audioPlayer.src = getStreamUrl(track);
+  // Передаем метаданные в URL, чтобы сервер не делал лишний запрос getInfo
+  const baseStreamUrl = getStreamUrl(track);
+  const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`;
+  
+  audioPlayer.src = streamUrlWithMeta;
   audioPlayer.load();
 
-  // Слушаем, когда браузер начнет воспроизведение
   audioPlayer.addEventListener('playing', () => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
@@ -581,12 +584,24 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // Предзагрузка следующего трека (чтобы он начинался мгновенно)
+  // 1. Предзагрузка на стороне браузера (Скрытый Audio)
+  if (currentTracks.length > 1) {
+    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+    const nextTrack = currentTracks[nextIndex];
+    if (nextTrack && nextTrack.stream_url) {
+      if (!hiddenPreloader) {
+        hiddenPreloader = new Audio();
+        hiddenPreloader.preload = 'auto';
+      }
+      hiddenPreloader.src = nextTrack.stream_url;
+    }
+  }
+
+  // 2. Предзагрузка на стороне сервера (в фоне)
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
     if (nextTrack && nextTrack.permalink_url) {
-      // Тихо стучимся на сервер, чтобы он скачал следующий трек в фоне
       fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}`).catch(() => {});
     }
   }
