@@ -479,5 +479,6 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
     border-radius: 3px;
     outline: none;
     -webkit-appearance: none;
+    appearance: none;
   }
 }
