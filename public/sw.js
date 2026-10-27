@@ -1,36 +1,28 @@
-const CACHE_NAME = 'muzlo-audio-v1';
 const AUDIO_CACHE_NAME = 'muzlo-tracks-v1';
+const MAX_CACHE_SIZE = 50; // Максимум 50 треков в кэше
 
-self.addEventListener('install', (event) => {
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(clients.claim());
-});
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Кэшируем только аудио-стрим
   if (url.pathname === '/api/search/stream') {
     event.respondWith(
       caches.open(AUDIO_CACHE_NAME).then(async (cache) => {
         const cachedResponse = await cache.match(event.request);
-        
-        if (cachedResponse) {
-          // Нашли в кэше — отдаем мгновенно
-          return cachedResponse;
-        }
+        if (cachedResponse) return cachedResponse;
 
-        // Нет в кэше — качаем
         try {
           const networkResponse = await fetch(event.request);
           
-          // Кэшируем только успешные ответы (200 OK, а не 206 Partial)
+          // Кэшируем только полные ответы
           if (networkResponse.status === 200) {
             const responseClone = networkResponse.clone();
             cache.put(event.request, responseClone);
+            
+            // Асинхронная очистка старых записей
+            cleanOldCache(cache);
           }
           
           return networkResponse;
@@ -41,3 +33,16 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+async function cleanOldCache(cache) {
+  try {
+    const keys = await cache.keys();
+    if (keys.length > MAX_CACHE_SIZE) {
+      // Удаляем самые старые (первым пришел — первым ушел)
+      const toDelete = keys.length - MAX_CACHE_SIZE;
+      for (let i = 0; i < toDelete; i++) {
+        await cache.delete(keys[i]);
+      }
+    }
+  } catch (e) {}
+}
