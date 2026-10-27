@@ -44,7 +44,6 @@ let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
-let hiddenPreloader = null; // Скрытый плеер для предзагрузки
 
 // Web Audio API
 let audioContext = null;
@@ -513,7 +512,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (Мгновенный старт + предзагрузка)
+// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -542,7 +541,6 @@ function playTrack(track) {
   btnPlay.textContent = '⏳'; 
   isPlaying = false;
 
-  // Передаем метаданные в URL, чтобы сервер не делал лишний запрос getInfo
   const baseStreamUrl = getStreamUrl(track);
   const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`;
   
@@ -584,25 +582,12 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // 1. Предзагрузка на стороне браузера (Скрытый Audio)
-  if (currentTracks.length > 1) {
-    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-    const nextTrack = currentTracks[nextIndex];
-    if (nextTrack && nextTrack.stream_url) {
-      if (!hiddenPreloader) {
-        hiddenPreloader = new Audio();
-        hiddenPreloader.preload = 'auto';
-      }
-      hiddenPreloader.src = nextTrack.stream_url;
-    }
-  }
-
-  // 2. Предзагрузка на стороне сервера (в фоне)
+  // ТОЛЬКО серверная предзагрузка (без hiddenPreloader, чтобы не было двойной загрузки)
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
     if (nextTrack && nextTrack.permalink_url) {
-      fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}`).catch(() => {});
+      fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`).catch(() => {});
     }
   }
 }
