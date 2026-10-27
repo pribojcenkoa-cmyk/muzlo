@@ -512,7 +512,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (С индикатором загрузки)
+// 6. ВОСПРОИЗВЕДЕНИЕ (С индикатором загрузки и предзагрузкой)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -579,6 +579,16 @@ function playTrack(track) {
           totalTimeEl.textContent = formatTime(data.duration);
         }
       }).catch(e => {});
+  }
+
+  // Предзагрузка следующего трека (чтобы он начинался мгновенно)
+  if (currentTracks.length > 1) {
+    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+    const nextTrack = currentTracks[nextIndex];
+    if (nextTrack && nextTrack.permalink_url) {
+      // Тихо стучимся на сервер, чтобы он скачал следующий трек в фоне
+      fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}`).catch(() => {});
+    }
   }
 }
 
