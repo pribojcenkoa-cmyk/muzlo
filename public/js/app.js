@@ -248,8 +248,6 @@ async function restorePlayerState() {
     isPlaying = false;
     btnPlay.textContent = '▶';
 
-    updateMediaSession(track);
-
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
         audioPlayer.currentTime = savedTime;
@@ -572,10 +570,8 @@ function playTrack(track) {
   btnPlay.textContent = '⏳';
   isPlaying = false;
 
-  // Обновляем виджет
   updateMediaSession(track);
 
-  // Ставим ссылку на стрим (SC или YT)
   audioPlayer.src = getStreamUrl(track);
 
   audioPlayer.addEventListener('playing', () => {
@@ -599,7 +595,18 @@ function playTrack(track) {
     isPlaying = false;
   });
 
-  // Предзагрузка следующего трека для быстрого скипа
+  if (track.permalink_url) {
+    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.duration) {
+          currentTrackRealDuration = data.duration;
+          totalTimeEl.textContent = formatTime(data.duration);
+        }
+      }).catch(e => {});
+  }
+
+  // Предзагрузка
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -619,11 +626,9 @@ function updateMediaSession(track) {
   if (!('mediaSession' in navigator)) return;
   
   try {
-    // YouTube обложки приходят уже с полным http адресом, SC требуют прокси
-    let cover = track.cover_url || '/img/default-cover.png';
-    if (!cover.startsWith('http')) {
-      cover = window.location.origin + cover;
-    }
+    const cover = track.cover_url 
+      ? (window.location.origin + track.cover_url) 
+      : (window.location.origin + '/img/default-cover.png');
 
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title || 'Muzlo',
@@ -883,11 +888,10 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
 
-    // --- ИСПРАВЛЕННЫЙ БЛОК КНОПОК ---
     const controlsDiv = document.createElement('div');
     controlsDiv.id = 'library-controls';
     controlsDiv.style.display = 'flex';
-    controlsDiv.style.flexWrap = 'wrap'; // Перенос если не влезают
+    controlsDiv.style.flexWrap = 'wrap';
     controlsDiv.style.gap = '8px';
     controlsDiv.style.marginBottom = '20px';
     controlsDiv.style.width = '100%'; 
@@ -900,10 +904,9 @@ function renderLibraryPage(tracks, albums) {
     `;
     trackListEl.appendChild(controlsDiv);
 
-    // Контейнер для самих треков
     const tracksContainer = document.createElement('div');
     tracksContainer.id = 'library-tracks-container';
-    tracksContainer.style.overflowX = 'hidden'; // Защита от вылезания
+    tracksContainer.style.overflowX = 'hidden';
     trackListEl.appendChild(tracksContainer);
 
     renderLibraryTracks(currentTracks, tracksContainer);
