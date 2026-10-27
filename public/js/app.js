@@ -313,7 +313,7 @@ function renderSearchResults(tracks, albums) {
   currentTracks = tracks || [];
   trackListEl.innerHTML = '';
 
-  // 1. Отрисовка Альбомов
+  // 1. Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Альбомы и плейлисты';
@@ -377,7 +377,7 @@ function renderSearchResults(tracks, albums) {
     });
   }
 
-  // 2. Отрисовка Треков
+  // 2. Треки
   if (currentTracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Треки';
@@ -893,24 +893,42 @@ authContainer.addEventListener('click', (e) => {
 function updateAuthUI(user) {
   if (user) {
     authContainer.innerHTML = `
-      <div class="profile-info" style="display: flex; flex-direction: column; gap: 10px;">
-        <span>👤 ${user.email}</span>
-        <button class="btn-logout" id="btn-logout" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer;">Выйти</button>
-        <button id="btn-show-change-password" style="padding: 5px; background: #333; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Сменить пароль</button>
-        <div id="change-password-form" style="display: none; margin-top: 10px; padding: 10px; background: #282828; border-radius: 8px;">
-          <input type="password" id="old-password" placeholder="Старый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">
-          <input type="password" id="new-password-profile" placeholder="Новый пароль" style="width: 100%; margin-bottom: 5px; padding: 5px; background: #121212; color: white; border: 1px solid #333; box-sizing: border-box;">
-          <button id="btn-save-new-password" style="width: 100%; padding: 5px; background: #1db954; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">Сохранить</button>
+      <div class="profile-menu-container">
+        <button class="btn-profile" id="btn-toggle-profile">👤 Аккаунт</button>
+        <div class="profile-dropdown hidden" id="profile-dropdown">
+          <div class="profile-email">${user.email}</div>
+          <button class="btn-dropdown" id="btn-show-change-password">Сменить пароль</button>
+          <button class="btn-dropdown btn-logout" id="btn-logout">Выйти</button>
+          
+          <div id="change-password-form" class="hidden" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
+            <input type="password" id="old-password" placeholder="Старый пароль" style="width: 100%; margin-bottom: 5px; padding: 8px; background: #121212; color: white; border: 1px solid #333; border-radius: 4px; box-sizing: border-box;">
+            <input type="password" id="new-password-profile" placeholder="Новый пароль" style="width: 100%; margin-bottom: 5px; padding: 8px; background: #121212; color: white; border: 1px solid #333; border-radius: 4px; box-sizing: border-box;">
+            <button id="btn-save-new-password" style="width: 100%; padding: 8px; background: #1db954; border: none; font-weight: bold; border-radius: 4px; cursor: pointer;">Сохранить</button>
+          </div>
         </div>
       </div>
     `;
     loadUserLikes();
 
+    const btnToggleProfile = document.getElementById('btn-toggle-profile');
+    const profileDropdown = document.getElementById('profile-dropdown');
+    
+    btnToggleProfile.addEventListener('click', (e) => {
+      e.stopPropagation();
+      profileDropdown.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (profileDropdown && !profileDropdown.contains(e.target) && e.target !== btnToggleProfile) {
+        profileDropdown.classList.add('hidden');
+      }
+    });
+
     const btnShowChangePass = document.getElementById('btn-show-change-password');
     const changePassForm = document.getElementById('change-password-form');
     
     btnShowChangePass.addEventListener('click', () => {
-      changePassForm.style.display = changePassForm.style.display === 'none' ? 'block' : 'none';
+      changePassForm.classList.toggle('hidden');
     });
 
     document.getElementById('btn-save-new-password').addEventListener('click', async () => {
@@ -928,7 +946,7 @@ function updateAuthUI(user) {
         const data = await res.json();
         if (res.ok) {
           alert('Пароль успешно изменен!');
-          changePassForm.style.display = 'none';
+          changePassForm.classList.add('hidden');
           document.getElementById('old-password').value = '';
           document.getElementById('new-password-profile').value = '';
         } else {
@@ -1188,7 +1206,7 @@ restorePlayerState();
 checkAuth();
 navHome.click();
 
-// --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ и F12) ---
+// --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
 
 document.addEventListener('keydown', function(e) {
