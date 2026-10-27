@@ -512,7 +512,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
+// 6. ВОСПРОИЗВЕДЕНИЕ (С индикатором загрузки)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -538,13 +538,21 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  audioPlayer.src = getStreamUrl(track);
+  // Включаем индикатор загрузки
+  btnPlay.textContent = '⏳'; 
+  isPlaying = false;
 
-  audioPlayer.play().then(() => {
+  audioPlayer.src = getStreamUrl(track);
+  audioPlayer.load();
+
+  // Слушаем, когда браузер начнет воспроизведение
+  audioPlayer.addEventListener('playing', () => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
     savePlayerState();
+  }, { once: true });
 
+  audioPlayer.play().then(() => {
     fetch('/api/search/history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -557,7 +565,7 @@ function playTrack(track) {
     }).catch(err => console.log('Не авторизован'));
 
   }).catch(err => {
-    console.error('Ошибка аудио:', err);
+    console.warn('Автовоспроизведение заблокировано:', err.message);
     btnPlay.textContent = '▶';
     isPlaying = false;
   });
@@ -884,7 +892,7 @@ function renderLibraryPage(tracks, albums) {
   }
 }
 
-// 8. АВТОРИЗАЦИЯ
+// 8. АВТОРИЗАЦИЯ (С выпадающим меню)
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
   if (e.target.id === 'btn-logout') logout();
