@@ -43,6 +43,7 @@ let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let hiddenPreloader = null;
+let isPoppingState = false; // Флаг для кнопки "Назад" в браузере
 
 // Web Audio API
 let audioContext = null;
@@ -685,7 +686,7 @@ audioPlayer.addEventListener('ended', () => {
 
 window.addEventListener('beforeunload', savePlayerState);
 
-// 7. НАВИГАЦИЯ
+// 7. НАВИГАЦИЯ (С ИСТОРИЕЙ БРАУЗЕРА)
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
@@ -694,7 +695,23 @@ function switchTab(activeTab, title, showSearch = false) {
   profileStats.style.display = 'none';
 }
 
+// Обработчик кнопки "Назад" в браузере
+window.addEventListener('popstate', (event) => {
+  isPoppingState = true;
+  if (event.state && event.state.tab) {
+    if (event.state.tab === 'home') navHome.click();
+    else if (event.state.tab === 'search') navSearch.click();
+    else if (event.state.tab === 'library') navLibrary.click();
+    else if (event.state.tab === 'wave') navWave.click();
+    else if (event.state.tab === 'profile') navProfile.click();
+  } else {
+    navHome.click(); // Если истории нет, кидаем на главную
+  }
+  isPoppingState = false;
+});
+
 navHome.addEventListener('click', async () => {
+  if (!isPoppingState) history.pushState({ tab: 'home' }, '', '#home');
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   await loadUserLikes();
@@ -708,6 +725,7 @@ navHome.addEventListener('click', async () => {
 });
 
 navWave.addEventListener('click', async () => {
+  if (!isPoppingState) history.pushState({ tab: 'wave' }, '', '#wave');
   switchTab(navWave, 'Моя волна');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Слушаем ваши вкусы...</p>';
   await loadUserLikes();
@@ -729,6 +747,7 @@ navWave.addEventListener('click', async () => {
 });
 
 navProfile.addEventListener('click', async () => {
+  if (!isPoppingState) history.pushState({ tab: 'profile' }, '', '#profile');
   switchTab(navProfile, 'Мой профиль');
   trackListEl.innerHTML = '';
   profileStats.style.display = 'block';
@@ -765,6 +784,7 @@ navProfile.addEventListener('click', async () => {
 });
 
 navSearch.addEventListener('click', async () => {
+  if (!isPoppingState) history.pushState({ tab: 'search' }, '', '#search');
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
   await loadUserLikes();
@@ -790,6 +810,7 @@ searchInput.addEventListener('input', (e) => {
 });
 
 navLibrary.addEventListener('click', async () => {
+  if (!isPoppingState) history.pushState({ tab: 'library' }, '', '#library');
   switchTab(navLibrary, 'Моя медиатека');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   try {
@@ -873,6 +894,35 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.color = '#b3b3b3';
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
+
+    // Кнопки выбора воспроизведения
+    const controlsDiv = document.createElement('div');
+    controlsDiv.style.display = 'flex';
+    controlsDiv.style.gap = '10px';
+    controlsDiv.style.marginBottom = '20px';
+    controlsDiv.innerHTML = `
+      <button id="lib-shuffle" style="padding: 8px 16px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer;">🔀 Перемешать</button>
+      <button id="lib-asc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer;">⬇️ Сверху вниз</button>
+      <button id="lib-desc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer;">⬆️ Снизу вверх</button>
+    `;
+    trackListEl.appendChild(controlsDiv);
+
+    // Логика для кнопок
+    document.getElementById('lib-shuffle').addEventListener('click', () => {
+      currentTracks.sort(() => Math.random() - 0.5);
+      renderTracks(currentTracks, true);
+      playTrack(currentTracks[0]);
+    });
+    document.getElementById('lib-asc').addEventListener('click', () => {
+      // Изначально треки идут по убыванию (сверху новые). Для "сверху вниз" (старые сначала) реверсируем
+      renderTracks(currentTracks.slice().reverse(), true);
+      playTrack(currentTracks[currentTracks.length - 1]);
+    });
+    document.getElementById('lib-desc').addEventListener('click', () => {
+      // "Снизу вверх" (новые сначала) — это изначальный порядок из базы
+      renderTracks(currentTracks, true);
+      playTrack(currentTracks[0]);
+    });
 
     tracks.forEach((track, index) => {
       const div = document.createElement('div');
@@ -1244,7 +1294,14 @@ btnDoImport.addEventListener('click', async () => {
 initAudioContext();
 restorePlayerState();
 checkAuth();
-navHome.click();
+
+// Проверяем хэш при загрузке страницы (если человек обновил страницу)
+const initialHash = window.location.hash.replace('#', '');
+if (initialHash === 'library') navLibrary.click();
+else if (initialHash === 'wave') navWave.click();
+else if (initialHash === 'search') navSearch.click();
+else if (initialHash === 'profile') navProfile.click();
+else navHome.click();
 
 // --- ЗАЩИТА (ПКМ и F12) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
