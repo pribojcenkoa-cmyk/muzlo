@@ -26,7 +26,7 @@ body {
   position: fixed;
   left: 0;
   top: 0;
-  bottom: 90px; /* Оставляем место для плеера */
+  bottom: 90px; 
   width: 250px;
   background-color: #000000;
   padding: 20px;
@@ -233,10 +233,10 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
 .btn-delete:hover { color: #ff4d4d; }
 
 /* =========================================
-   ПЛЕЕР (ПК ВЕРСИЯ - РОВНЫЙ)
+   ПЛЕЕР (ПК ВЕРСИЯ)
    ========================================= */
 .player {
-  position: fixed; bottom: 0; left: 0; width: 100%; height: 80px;
+  position: fixed; bottom: 0; left: 0; width: 100%; height: 85px;
   background-color: #181818; border-top: 1px solid #282828;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 20px; z-index: 200;
@@ -274,13 +274,20 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
 .control-btn:hover { color: #fff; }
 
 .play-btn {
-  width: 40px; height: 40px; background-color: #fff; color: #000;
+  width: 42px; height: 42px; background-color: #fff; color: #000;
   border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 18px; border: none; cursor: pointer; transition: 0.2s;
 }
 .play-btn:hover { transform: scale(1.05); color: #000; }
 
-.player-progress { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #b3b3b3; }
+.player-progress { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  font-size: 12px; 
+  color: #b3b3b3; 
+  margin-top: 2px; /* Отступ для времени */
+}
 
 .player-volume { display: flex; align-items: center; gap: 10px; width: 30%; justify-content: flex-end; font-size: 14px; }
 .player-volume input { width: 100px; accent-color: #1db954; cursor: pointer; }
@@ -326,7 +333,7 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
 .hidden { display: none !important; }
 
 /* =========================================
-   АДАПТАЦИЯ ПОД МОБИЛЬНЫЕ ТЕЛЕФОНЫ (КОМПАКТНЫЙ ПЛЕЕР)
+   АДАПТАЦИЯ ПОД МОБИЛЬНЫЕ ТЕЛЕФОНЫ
    ========================================= */
 @media (max-width: 768px) {
   
@@ -361,7 +368,7 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
   /* Основной контент */
   .content {
     margin-left: 0 !important;
-    height: calc(100vh - 140px) !important; 
+    height: calc(100vh - 145px) !important; /* Оставляем больше места для плеера */
     padding: 10px !important;
   }
 
@@ -377,21 +384,20 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
   .track-artist { font-size: 12px; }
   .track-duration { font-size: 12px; margin-right: 10px; }
 
-  /* --- 2. МОБИЛЬНЫЙ ПЛЕЕР (КОМПАКТНЫЙ В ОДНУ СТРОКУ) --- */
+  /* --- 2. МОБИЛЬНЫЙ ПЛЕЕР (В 2 СТРОКИ, ЧТОБЫ НЕ НАЛЕЗАЛО) --- */
   .player {
-    flex-direction: row !important; /* В одну строку! */
-    height: 70px !important;
-    padding: 0 10px !important;
-    gap: 10px !important;
-    background: #181818;
-    border-top: 1px solid #333;
+    flex-direction: row !important;
+    flex-wrap: wrap !important; /* Разрешаем перенос на вторую строку */
+    height: 85px !important;
+    padding: 5px 10px !important;
+    gap: 0 !important;
     align-items: center !important;
     justify-content: space-between !important;
   }
 
-  /* Инфо о треке (Слева, обрезается) */
+  /* 1-я строка: Инфо о треке */
   .player-track-info {
-    width: 50% !important;
+    width: 65% !important;
     justify-content: flex-start !important;
     gap: 10px !important;
     margin: 0 !important;
@@ -400,47 +406,50 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
   .player-title { font-size: 13px !important; font-weight: 600; }
   .player-artist { font-size: 11px !important; }
 
-  /* Кнопки (По центру) */
+  /* 1-я строка: Кнопки (прижаты вправо) */
   .player-controls {
-    width: 40% !important;
+    width: 35% !important;
     flex-direction: row !important; 
     justify-content: flex-end !important;
-    gap: 10px !important;
+    gap: 15px !important;
   }
   
   .player-buttons {
     display: flex !important;
-    justify-content: center !important;
+    justify-content: flex-end !important;
     align-items: center !important;
     gap: 15px !important;
   }
 
   .btn-play, #btn-play {
-    width: 40px !important; height: 40px !important;
+    width: 38px !important; height: 38px !important;
     border-radius: 50% !important; background: #fff !important;
-    color: #000 !important; font-size: 18px !important;
+    color: #000 !important; font-size: 16px !important;
     display: flex; align-items: center; justify-content: center;
   }
-  .control-btn { font-size: 20px !important; }
+  .control-btn { font-size: 18px !important; }
   
-  /* Время (маленькое, под кнопками) */
+  /* Прячем время на мобилке, чтобы не мешало */
   .player-progress {
-    display: none !important; /* Прячем время, чтобы не мешало, или можно оставить мелким */
+    display: none !important; 
   }
 
-  /* Громкость (Справа, уменьшена) */
+  /* 2-я строка: Громкость (занимает всю ширину внизу) */
   .player-volume {
     display: flex !important;
     align-items: center !important;
-    justify-content: flex-end !important;
-    width: 10% !important;
-    padding: 0 !important;
-    gap: 0 !important;
+    justify-content: center !important;
+    width: 100% !important; /* Переносится на новую строку */
+    padding: 0 15px !important;
+    gap: 10px !important;
+    margin-top: 2px !important;
   }
-  .player-volume span { display: none !important; } /* Прячем текст и иконку, оставляем только ползунок */
+  
+  .player-volume span { display: block !important; font-size: 11px !important; }
   
   .player-volume input[type="range"] { 
-    width: 60px !important; 
+    flex: 1 !important;
+    max-width: 200px;
     height: 4px !important; 
     accent-color: #1db954;
   }
