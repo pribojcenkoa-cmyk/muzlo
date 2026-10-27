@@ -52,10 +52,12 @@ let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 
-// Удаляем старый Service Worker (он ломал перемотку)
+// УДАЛЯЕМ СТАРЫЙ SERVICE WORKER (он ломал перемотку на длинных треках)
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(function(registrations) {
-    for(let registration of registrations) registration.unregister();
+    for(let registration of registrations) {
+      registration.unregister();
+    }
   });
   if (window.caches) {
     caches.keys().then(function(names) {
@@ -289,7 +291,7 @@ function renderTracks(tracksArray, isLibrary = false) {
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
-      playTrack(track, false); // обычный режим
+      playTrack(track);
     });
 
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
@@ -328,8 +330,13 @@ function renderTracks(tracksArray, isLibrary = false) {
             actionBtn.classList.add('liked');
             actionBtn.textContent = '❤';
             userLikedTrackIds.add(String(track.id));
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            alert(`Ошибка сохранения: ${errData.error || 'Сервер не отвечает'}`);
           }
-        } catch (err) {}
+        } catch (err) {
+          alert('Ошибка сети при сохранении трека');
+        }
       });
     }
     trackListEl.appendChild(div);
@@ -338,11 +345,12 @@ function renderTracks(tracksArray, isLibrary = false) {
   precacheFirstTracks(currentTracks, 3);
 }
 
-// Функция для отрисовки поиска
+// Функция для отрисовки поиска (Альбомы + Треки)
 function renderSearchResults(tracks, albums) {
   currentTracks = tracks || [];
   trackListEl.innerHTML = '';
 
+  // 1. Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Альбомы и плейлисты';
@@ -406,6 +414,7 @@ function renderSearchResults(tracks, albums) {
     });
   }
 
+  // 2. Треки
   if (currentTracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Треки';
@@ -442,7 +451,7 @@ function renderSearchResults(tracks, albums) {
         document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
         div.classList.add('active');
         currentTrackIndex = index;
-        playTrack(track, false);
+        playTrack(track);
       });
 
       const actionBtn = div.querySelector('.btn-like');
@@ -484,6 +493,7 @@ function renderSearchResults(tracks, albums) {
   }
 }
 
+// Функция загрузки треков из альбома
 async function loadAlbum(albumUrl) {
   if (!albumUrl || albumUrl === 'undefined') {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка: неверная ссылка.</p>';
@@ -543,8 +553,8 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (обычный/быстрый режимы)
-function playTrack(track, quick = false) {
+// 6. ВОСПРОИЗВЕДЕНИЕ (Всегда быстрый режим по умолчанию)
+function playTrack(track, quick = true) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
     playerEl.classList.remove('hidden');
@@ -730,7 +740,7 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// Трек закончился сам — переключаем следующий в ОБЫЧНОМ режиме (precached → ползунок работает)
+// Трек закончился сам — переключаем следующий
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
@@ -740,7 +750,7 @@ audioPlayer.addEventListener('ended', () => {
   const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
   if (nextEl) nextEl.classList.add('active');
   currentTrackIndex = nextIndex;
-  playTrack(currentTracks[nextIndex], false); // normal mode
+  playTrack(currentTracks[nextIndex]); 
 });
 
 window.addEventListener('beforeunload', savePlayerState);
@@ -873,12 +883,14 @@ navLibrary.addEventListener('click', async () => {
   }
 });
 
+// Функция для отрисовки медиатеки (Альбомы + Треки)
 function renderLibraryPage(tracks, albums) {
   currentTracks = tracks || [];
   currentTrackIndex = -1;
 
   trackListEl.innerHTML = '';
   
+  // 1. Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Сохраненные альбомы';
@@ -926,6 +938,7 @@ function renderLibraryPage(tracks, albums) {
     });
   }
 
+  // 2. Треки
   if (tracks && tracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Сохраненные треки';
@@ -959,7 +972,7 @@ function renderLibraryPage(tracks, albums) {
         document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
         div.classList.add('active');
         currentTrackIndex = index;
-        playTrack(track, false);
+        playTrack(track);
       });
 
       const deleteBtn = div.querySelector('.btn-delete');
@@ -1120,7 +1133,7 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// --- СБРОС ПАРОЛЯ ---
+// --- ЛОГИКА СБРОСА ПАРОЛЯ ---
 const btnForgot = document.getElementById('btn-forgot-password');
 const resetBlock = document.getElementById('reset-password-block');
 const btnBackToLogin = document.getElementById('btn-back-to-login');
