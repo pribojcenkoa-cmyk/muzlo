@@ -62,6 +62,16 @@ if ('serviceWorker' in navigator) {
 }
 
 // 2. УТИЛИТЫ
+const escapeHTML = (str) => {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 const formatTime = (seconds) => {
   if (!seconds || isNaN(seconds)) return '0:00';
   const min = Math.floor(seconds / 60);
@@ -143,8 +153,8 @@ async function loadAdminStats() {
         const roleColor = user.role === 'admin' ? '#ff4d4d' : '#b3b3b3';
         html += `<tr>
           <td style="padding: 3px 0;">${user.id}</td>
-          <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px;">${user.email}</td>
-          <td style="color: ${roleColor}; font-weight: bold;">${user.role}</td>
+          <td style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px;">${escapeHTML(user.email)}</td>
+          <td style="color: ${roleColor}; font-weight: bold;">${escapeHTML(user.role)}</td>
         </tr>`;
       });
       html += '</table>';
@@ -250,8 +260,8 @@ function renderTracks(tracksArray, isLibrary = false) {
     div.innerHTML = `
       <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
       <div class="track-info">
-        <div class="track-title">${track.title}</div>
-        <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name || 'Неизвестен'}">${track.artist_name || 'Неизвестен'}</span></div>
+        <div class="track-title">${escapeHTML(track.title)}</div>
+        <div class="track-artist"><span class="artist-link" data-artist="${escapeHTML(track.artist_name || 'Неизвестен')}">${escapeHTML(track.artist_name || 'Неизвестен')}</span></div>
       </div>
       <div class="track-duration">${formatTime(track.duration)}</div>
       ${actionBtnHTML}
@@ -296,7 +306,7 @@ function renderTracks(tracksArray, isLibrary = false) {
             body: JSON.stringify({
               track_id: String(track.id), title: track.title, artist_name: track.artist_name,
               cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl,
-              genre: track.genre // <--- Передаем жанр
+              genre: track.genre
             })
           });
           if (res.status === 401) {
@@ -336,8 +346,8 @@ function renderSearchResults(tracks, albums) {
       div.innerHTML = `
         <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
         <div class="track-info">
-          <div class="track-title">${album.title}</div>
-          <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
+          <div class="track-title">${escapeHTML(album.title)}</div>
+          <div class="track-artist"><span>${escapeHTML(album.artist_name)} • ${album.track_count} треков</span></div>
         </div>
         <div class="track-duration" style="font-size: 20px;">💿</div>
         <button class="btn-like ${isSaved ? 'liked' : ''}" title="Сохранить">${isSaved ? '❤' : '♥'}</button>
@@ -401,8 +411,8 @@ function renderSearchResults(tracks, albums) {
       div.innerHTML = `
         <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
         <div class="track-info">
-          <div class="track-title">${track.title}</div>
-          <div class="track-artist"><span class="artist-link" data-artist="${track.artist_name || 'Неизвестен'}">${track.artist_name || 'Неизвестен'}</span></div>
+          <div class="track-title">${escapeHTML(track.title)}</div>
+          <div class="track-artist"><span class="artist-link" data-artist="${escapeHTML(track.artist_name || 'Неизвестен')}">${escapeHTML(track.artist_name || 'Неизвестен')}</span></div>
         </div>
         <div class="track-duration">${formatTime(track.duration)}</div>
         ${actionBtnHTML}
@@ -434,7 +444,7 @@ function renderSearchResults(tracks, albums) {
             body: JSON.stringify({
               track_id: String(track.id), title: track.title, artist_name: track.artist_name,
               cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl,
-              genre: track.genre // <--- Передаем жанр
+              genre: track.genre
             })
           });
           if (res.status === 401) {
@@ -555,7 +565,6 @@ function playTrack(track) {
   }, { once: true });
 
   audioPlayer.play().then(() => {
-    // Отправляем историю с жанром
     fetch('/api/search/history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -564,7 +573,7 @@ function playTrack(track) {
         title: track.title,
         artist_name: track.artist_name,
         duration: track.duration,
-        genre: track.genre // <--- Передаем жанр
+        genre: track.genre
       })
     }).catch(err => console.log('Не авторизован'));
 
@@ -742,12 +751,12 @@ navProfile.addEventListener('click', async () => {
 
       <h3 style="margin-bottom: 10px;">Топ артистов:</h3>
       <ul style="list-style: none; padding: 0; margin-bottom: 20px;">
-        ${data.top_artists.map(a => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${a.artist_name} — <span style="color:#b3b3b3;">${a.count} раз</span></li>`).join('') || '<li>Нет данных</li>'}
+        ${data.top_artists.map(a => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${escapeHTML(a.artist_name)} — <span style="color:#b3b3b3;">${a.count} раз</span></li>`).join('') || '<li>Нет данных</li>'}
       </ul>
 
       <h3 style="margin-bottom: 10px;">Топ треков:</h3>
       <ul style="list-style: none; padding: 0;">
-        ${data.top_tracks.map(t => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${t.title} — <span style="color:#b3b3b3;">${t.artist_name} (${t.count} раз)</span></li>`).join('') || '<li>Нет данных</li>'}
+        ${data.top_tracks.map(t => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${escapeHTML(t.title)} — <span style="color:#b3b3b3;">${escapeHTML(t.artist_name)} (${t.count} раз)</span></li>`).join('') || '<li>Нет данных</li>'}
       </ul>
     `;
   } catch (err) {
@@ -824,8 +833,8 @@ function renderLibraryPage(tracks, albums) {
       div.innerHTML = `
         <img src="${getValidCover(album.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
         <div class="track-info">
-          <div class="track-title">${album.title}</div>
-          <div class="track-artist"><span>${album.artist_name} • ${album.track_count} треков</span></div>
+          <div class="track-title">${escapeHTML(album.title)}</div>
+          <div class="track-artist"><span>${escapeHTML(album.artist_name)} • ${album.track_count} треков</span></div>
         </div>
         <div class="track-duration" style="font-size: 20px;">💿</div>
         <button class="btn-delete" title="Удалить">✕</button>
@@ -873,8 +882,8 @@ function renderLibraryPage(tracks, albums) {
       div.innerHTML = `
         <img src="${getValidCover(track.cover_url)}" class="track-cover" alt="Cover" referrerpolicy="no-referrer">
         <div class="track-info">
-          <div class="track-title">${track.title}</div>
-          <div class="track-artist"><span>${track.artist_name || 'Неизвестен'}</span></div>
+          <div class="track-title">${escapeHTML(track.title)}</div>
+          <div class="track-artist"><span>${escapeHTML(track.artist_name || 'Неизвестен')}</span></div>
         </div>
         <div class="track-duration">${formatTime(track.duration)}</div>
         <button class="btn-delete" title="Удалить">✕</button>
@@ -927,7 +936,7 @@ function updateAuthUI(user) {
       <div class="profile-menu-container">
         <button class="btn-profile" id="btn-toggle-profile">👤 Аккаунт</button>
         <div class="profile-dropdown hidden" id="profile-dropdown">
-          <div class="profile-email">${user.email}</div>
+          <div class="profile-email">${escapeHTML(user.email)}</div>
           <button class="btn-dropdown" id="btn-show-change-password">Сменить пароль</button>
           <button class="btn-dropdown btn-logout" id="btn-logout">Выйти</button>
           
