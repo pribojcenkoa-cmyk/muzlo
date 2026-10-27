@@ -44,6 +44,7 @@ let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
+let hiddenPreloader = null; // Скрытый плеер для предзагрузки браузером
 
 // Web Audio API
 let audioContext = null;
@@ -512,7 +513,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
+// 6. ВОСПРОИЗВЕДЕНИЕ (С индикатором загрузки, предзагрузкой и передачей метаданных)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -538,9 +539,11 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
+  // Включаем индикатор загрузки
   btnPlay.textContent = '⏳'; 
   isPlaying = false;
 
+  // Передаем метаданные в URL, чтобы сервер не делал лишний запрос getInfo
   const baseStreamUrl = getStreamUrl(track);
   const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`;
   
@@ -582,15 +585,45 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // ТОЛЬКО серверная предзагрузка (без hiddenPreloader, чтобы не было двойной загрузки)
+  // --- ПРЕДЗАГРУЗКА СЛЕДУЮЩЕГО ТРЕКА ---
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
-    if (nextTrack && nextTrack.permalink_url) {
-      fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`).catch(() => {});
+    
+    if (nextTrack && nextTrack.stream_url) {
+      const nextUrlWithMeta = `${nextTrack.stream_url}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`;
+
+      // 1. Предзагрузка на стороне браузера (скрытый Audio)
+      if (!hiddenPreloader) {
+        hiddenPreloader = new Audio();
+        hiddenPreloader.preload = 'auto';
+      }
+      hiddenPreloader.src = nextUrlWithMeta;
+      hiddenPreloader.load();
+
+      // 2. Предзагрузка на стороне сервера (в фоне)
+      if (nextTrack.permalink_url) {
+        fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`).catch(() => {});
+      }
     }
   }
 }
+
+// Отображение процента загрузки на кнопке Play
+audioPlayer.addEventListener('progress', () => {
+  if (!isPlaying && btnPlay.textContent.startsWith('⏳')) {
+    if (audioPlayer.buffered.length > 0) {
+      const bufferedEnd = audioPlayer.buffered.end(audioPlayer.buffered.length - 1);
+      const duration = audioPlayer.duration || currentTrackRealDuration;
+      if (duration > 0) {
+        const percent = Math.round((bufferedEnd / duration) * 100);
+        if (percent < 100) {
+          btnPlay.textContent = `⏳ ${percent}%`;
+        }
+      }
+    }
+  }
+});
 
 btnPlay.addEventListener('click', () => {
   if (!audioPlayer.src) return;
@@ -1223,6 +1256,15 @@ initAudioContext();
 restorePlayerState();
 checkAuth();
 navHome.click();
+
+// Регистрация Service Worker для кэширования аудио
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(() => {
+    console.log('Service Worker для аудио зарегистрирован');
+  }).catch(err => {
+    console.warn('Service Worker не установился:', err);
+  });
+}
 
 // --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
