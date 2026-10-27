@@ -295,7 +295,8 @@ function renderTracks(tracksArray, isLibrary = false) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               track_id: String(track.id), title: track.title, artist_name: track.artist_name,
-              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl
+              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl,
+              genre: track.genre // <--- Передаем жанр
             })
           });
           if (res.status === 401) {
@@ -432,7 +433,8 @@ function renderSearchResults(tracks, albums) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               track_id: String(track.id), title: track.title, artist_name: track.artist_name,
-              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl
+              cover_url: track.cover_url, duration: track.duration, stream_url: streamUrl,
+              genre: track.genre // <--- Передаем жанр
             })
           });
           if (res.status === 401) {
@@ -553,6 +555,7 @@ function playTrack(track) {
   }, { once: true });
 
   audioPlayer.play().then(() => {
+    // Отправляем историю с жанром
     fetch('/api/search/history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -560,7 +563,8 @@ function playTrack(track) {
         track_id: track.id,
         title: track.title,
         artist_name: track.artist_name,
-        duration: track.duration
+        duration: track.duration,
+        genre: track.genre // <--- Передаем жанр
       })
     }).catch(err => console.log('Не авторизован'));
 
@@ -581,7 +585,7 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // Браузерная предзагрузка следующего трека
+  // Предзагрузка следующего трека
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];

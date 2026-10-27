@@ -27,6 +27,7 @@ function formatTrack(track) {
     id: track.id,
     title: track.title || 'Без названия',
     artist_name: track.user ? track.user.username : 'Неизвестен',
+    genre: track.genre || null, // <-- Сохраняем жанр
     cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
     duration: Math.round((track.duration || 0) / 1000),
     permalink_url: track.permalink_url,
@@ -152,42 +153,88 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Волна
+// 5. ВОЛНА (Подбор по ЖАНРАМ)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
-    const topArtists = await query(
-      `SELECT artist_name, COUNT(*) as play_count FROM listening_history 
-       WHERE user_id = $1 AND artist_name IS NOT NULL GROUP BY artist_name 
-       ORDER BY play_count DESC LIMIT 7`, [req.user.id]);
-    let baseArtists = topArtists.rows.map(r => r.artist_name);
-    if (baseArtists.length < 5) {
-      const liked = await query('SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5', [req.user.id]);
-      baseArtists = [...new Set([...baseArtists, ...liked.rows.map(r => r.artist_name)])];
+    // 1. Получаем ID всех треков из медиатеки, чтобы их исключить
+    const libraryRes = await query('SELECT track_id FROM user_library WHERE user_id = $1', [req.user.id]);
+    const likedTrackIds = new Set(libraryRes.rows.map(r => String(r.track_id)));
+
+    // 2. Собираем топ жанров из истории и лайков
+    const genresRes = await query(
+      `SELECT genre, COUNT(*) as count 
+       FROM (
+         SELECT genre FROM listening_history WHERE user_id = $1 AND genre IS NOT NULL AND genre != ''
+         UNION ALL
+         SELECT genre FROM user_library WHERE user_id = $1 AND genre IS NOT NULL AND genre != ''
+       ) as all_genres
+       GROUP BY genre
+       ORDER BY count DESC
+       LIMIT 5`,
+      [req.user.id]
+    );
+    
+    let topGenres = genresRes.rows.map(r => r.genre);
+
+    // Если жанров нет (например, старые треки без жанра), берем артистов
+    if (topGenres.length === 0) {
+      const topHistory = await query(
+        `SELECT artist_name, COUNT(*) as play_count FROM listening_history 
+         WHERE user_id = $1 AND artist_name IS NOT NULL GROUP BY artist_name ORDER BY play_count DESC LIMIT 5`, 
+        [req.user.id]);
+      const topLiked = await query(
+        `SELECT DISTINCT artist_name FROM user_library 
+         WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5`, 
+        [req.user.id]);
+      topGenres = [...new Set([
+        ...topHistory.rows.map(r => r.artist_name),
+        ...topLiked.rows.map(r => r.artist_name)
+      ])];
     }
-    if (baseArtists.length === 0) baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
-    const randomPopular = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).filter(a => !baseArtists.includes(a)).slice(0, 3);
-    const allArtists = [...baseArtists, ...randomPopular];
+
+    // Если вообще пусто — случайные популярные
+    if (topGenres.length === 0) {
+      topGenres = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
+    }
+
     let allTracks = [];
-    for (const artist of allArtists) {
-      if (!artist || artist === 'Неизвестен') continue;
+
+    // 3. Ищем треки по этим жанрам (или артистам)
+    for (const queryStr of topGenres) {
       try {
-        const tracks = await searchSoundCloud(artist);
-        const filtered = tracks.filter(t => t.artist_name.toLowerCase().includes(artist.toLowerCase()) || artist.toLowerCase().includes(t.artist_name.toLowerCase()));
-        allTracks = allTracks.concat(filtered.sort(() => 0.5 - Math.random()).slice(0, 10));
+        const tracks = await searchSoundCloud(queryStr);
+        // Фильтруем: убираем то, что уже в медиатеке
+        const newTracks = tracks.filter(t => !likedTrackIds.has(String(t.id)));
+        // Берем 10 случайных треков из этого жанра
+        allTracks = allTracks.concat(newTracks.sort(() => 0.5 - Math.random()).slice(0, 10));
       } catch (e) {}
     }
-    res.json({ tracks: allTracks.sort(() => 0.5 - Math.random()).slice(0, 40) });
+
+    // 4. Если ничего не нашли, берем популярного артиста
+    if (allTracks.length === 0) {
+      const randomArtist = POPULAR_ARTISTS[Math.floor(Math.random() * POPULAR_ARTISTS.length)];
+      const fallbackTracks = await searchSoundCloud(randomArtist);
+      allTracks = fallbackTracks.filter(t => !likedTrackIds.has(String(t.id)));
+    }
+
+    // Перемешиваем и отдаем 40 треков
+    const shuffled = allTracks.sort(() => 0.5 - Math.random()).slice(0, 40);
+    res.json({ tracks: shuffled });
+
   } catch (err) {
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
 });
 
-// 6. История
+// 6. История (ТЕПЕРЬ С ЖАНРОМ)
 router.post('/history', requireAuth, async (req, res) => {
   try {
-    const { track_id, title, artist_name, duration } = req.body;
+    const { track_id, title, artist_name, duration, genre } = req.body;
     if (!track_id) return res.status(400).json({ error: 'Нет ID трека' });
-    await query('INSERT INTO listening_history (user_id, track_id, title, artist_name, duration) VALUES ($1, $2, $3, $4, $5)', [req.user.id, String(track_id), title, artist_name, duration]);
+    await query(
+      'INSERT INTO listening_history (user_id, track_id, title, artist_name, duration, genre) VALUES ($1, $2, $3, $4, $5, $6)', 
+      [req.user.id, String(track_id), title, artist_name, duration, genre || null]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка сохранения истории' });
@@ -338,7 +385,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (простейший, мгновенный)
+// 12. СТРИМИНГ (мгновенный)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;

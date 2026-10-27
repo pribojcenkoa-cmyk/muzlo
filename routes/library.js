@@ -20,15 +20,15 @@ router.get('/', requireAuth, async (req, res) => {
 // Добавить трек
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const { track_id, title, artist_name, cover_url, duration, stream_url } = req.body;
+    const { track_id, title, artist_name, cover_url, duration, stream_url, genre } = req.body;
     if (!track_id) return res.status(400).json({ error: 'Нет ID трека' });
     
     const existing = await query('SELECT id FROM user_library WHERE user_id = $1 AND track_id = $2', [req.user.id, track_id]);
     if (existing.rows.length > 0) return res.json({ success: true });
 
     await query(
-      'INSERT INTO user_library (user_id, track_id, title, artist_name, cover_url, duration, stream_url) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [req.user.id, track_id, title, artist_name, cover_url, duration, stream_url]
+      'INSERT INTO user_library (user_id, track_id, title, artist_name, cover_url, duration, stream_url, genre) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [req.user.id, track_id, title, artist_name, cover_url, duration, stream_url, genre || null]
     );
     res.json({ success: true });
   } catch (err) {
