@@ -50,7 +50,7 @@ let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 
-// --- MEDIA SESSION (РЕГИСТРАЦИЯ КНОПОК 1 РАЗ) ---
+// --- MEDIA SESSION (РЕГИСТРАЦИЯ КНОПОК ВИДЖЕТА 1 РАЗ) ---
 if ('mediaSession' in navigator) {
   try {
     navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
@@ -570,7 +570,6 @@ function playTrack(track) {
   btnPlay.textContent = '⏳';
   isPlaying = false;
 
-  // Установка Метаданных виджета ДО начала проигрывания
   updateMediaSession(track);
 
   audioPlayer.src = getStreamUrl(track);
@@ -627,7 +626,6 @@ function updateMediaSession(track) {
   if (!('mediaSession' in navigator)) return;
   
   try {
-    // Формируем абсолютный URL обложки (Android требует строго https://...)
     const cover = track.cover_url 
       ? (window.location.origin + track.cover_url) 
       : (window.location.origin + '/img/default-cover.png');
@@ -890,22 +888,25 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
 
-    // Блок кнопок - СТРОГО НЕ ПЕРЕРИСОВЫВАЕТСЯ
     const controlsDiv = document.createElement('div');
     controlsDiv.id = 'library-controls';
     controlsDiv.style.display = 'flex';
-    controlsDiv.style.gap = '10px';
+    controlsDiv.style.flexWrap = 'wrap';
+    controlsDiv.style.gap = '8px';
     controlsDiv.style.marginBottom = '20px';
+    controlsDiv.style.width = '100%'; 
+    controlsDiv.style.boxSizing = 'border-box';
+    
     controlsDiv.innerHTML = `
-      <button id="lib-shuffle" style="padding: 8px 16px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; flex-shrink: 0;">🔀 Перемешать</button>
-      <button id="lib-asc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; flex-shrink: 0;">⬇️ Сверху вниз</button>
-      <button id="lib-desc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; flex-shrink: 0;">⬆️ Снизу вверх</button>
+      <button id="lib-shuffle" style="flex: 1; min-width: 90px; padding: 8px 4px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; white-space: nowrap;">🔀 Перемешать</button>
+      <button id="lib-asc" style="flex: 1; min-width: 90px; padding: 8px 4px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; font-size: 12px; white-space: nowrap;">⬇️ Сверху вниз</button>
+      <button id="lib-desc" style="flex: 1; min-width: 90px; padding: 8px 4px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; font-size: 12px; white-space: nowrap;">⬆️ Снизу вверх</button>
     `;
     trackListEl.appendChild(controlsDiv);
 
-    // Контейнер для самих треков
     const tracksContainer = document.createElement('div');
     tracksContainer.id = 'library-tracks-container';
+    tracksContainer.style.overflowX = 'hidden';
     trackListEl.appendChild(tracksContainer);
 
     renderLibraryTracks(currentTracks, tracksContainer);
