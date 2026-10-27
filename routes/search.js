@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { createRequire } from 'module';
 import { query } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -10,6 +12,12 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
+// Папка для временного хранения треков на сервере
+const TRACKS_DIR = path.join(process.cwd(), 'storage', 'tracks');
+if (!fs.existsSync(TRACKS_DIR)) {
+  fs.mkdirSync(TRACKS_DIR, { recursive: true });
+}
+
 const POPULAR_ARTISTS = [
   'Onda Andar', 'Sematary', 'Kizaru', 'Miyagi', 'Andy Panda', 'Scriptonite', 
   'Boulevard Depo', 'Pharaoh', 'FACE', 'LSP', 'Markul', 'T-Fest', 
@@ -19,7 +27,47 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// Вспомогательная функция форматирования трека
+// ============ TELEGRAM ХРАНИЛИЩЕ ============
+async function uploadToTelegram(filePath, trackTitle, artistName) {
+  const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
+  const TG_CHAT_ID = process.env.TG_CHAT_ID;
+  
+  if (!TG_BOT_TOKEN || !TG_CHAT_ID) throw new Error('TG не настроен');
+
+  const fileBuffer = fs.readFileSync(filePath);
+  const formData = new FormData();
+  formData.append('chat_id', TG_CHAT_ID);
+  formData.append('audio', new Blob([fileBuffer], { type: 'audio/mpeg' }), 'track.mp3');
+  formData.append('title', trackTitle || 'Unknown');
+  formData.append('performer', artistName || 'Unknown');
+  
+  const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendAudio`, {
+    method: 'POST',
+    body: formData
+  });
+  
+  const data = await res.json();
+  if (!data.ok) throw new Error(`TG upload failed: ${JSON.stringify(data)}`);
+  
+  return data.result.audio.file_id;
+}
+
+async function downloadFromTelegram(fileId, destPath) {
+  const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
+  
+  const infoRes = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const infoData = await infoRes.json();
+  if (!infoData.ok) throw new Error('TG getFile failed');
+  
+  const filePath = infoData.result.file_path;
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${TG_BOT_TOKEN}/${filePath}`);
+  if (!fileRes.ok) throw new Error('TG download failed');
+  
+  const buffer = await fileRes.arrayBuffer();
+  fs.writeFileSync(destPath, Buffer.from(buffer));
+}
+// ============================================
+
 function formatTrack(track) {
   if (!track) return null;
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
@@ -36,7 +84,6 @@ function formatTrack(track) {
   };
 }
 
-// Вспомогательная функция поиска
 async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
@@ -156,13 +203,13 @@ router.get('/album', async (req, res) => {
       }
     } catch (e) {}
 
-    throw new Error('Все методы загрузки альбома исчерпаны');
+    throw new Error('Все методы исчерпаны');
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки альбома.' });
   }
 });
 
-// 3. Инфо (длительность)
+// 3. Инфо
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -293,7 +340,7 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. ИМПОРТ ИЗ SOUNDCLOUD (Лайки)
+// 8. Импорт лайков
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
@@ -309,7 +356,7 @@ router.get('/import-likes', async (req, res) => {
           url = info.permalink_url.split('?')[0].replace(/\/$/, '');
         }
       } catch (e) {
-        return res.status(400).json({ error: 'Не удалось открыть короткую ссылку. Скопируйте полную ссылку профиля.' });
+        return res.status(400).json({ error: 'Не удалось открыть короткую ссылку.' });
       }
     }
 
@@ -356,11 +403,11 @@ router.get('/import-likes', async (req, res) => {
     }
 
   } catch (err) { 
-    res.status(400).json({ error: 'SoundCloud заблокировал запросы. Используйте импорт текстом.' }); 
+    res.status(400).json({ error: 'SoundCloud заблокировал запросы.' }); 
   }
 });
 
-// 9. ИМПОРТ ИЗ ЯНДЕКСА
+// 9. Импорт Яндекса
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) return res.status(400).json({ error: 'Ссылка не с Яндекса' });
@@ -408,7 +455,7 @@ router.get('/import-yandex', async (req, res) => {
     } catch (err) {}
   }
 
-  if (parsedTracks.length === 0) return res.status(404).json({ error: 'Яндекс блокирует запросы. Используйте текст.' });
+  if (parsedTracks.length === 0) return res.status(404).json({ error: 'Яндекс блокирует запросы.' });
 
   const tracks = [];
   for (const track of parsedTracks) {
@@ -424,7 +471,7 @@ router.get('/import-yandex', async (req, res) => {
   res.json({ tracks });
 });
 
-// 10. ИМПОРТ ИЗ ТЕКСТА
+// 10. Импорт текста
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
   if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список' });
@@ -439,11 +486,11 @@ router.post('/import-text', async (req, res) => {
     } catch (e) {}
   }
 
-  if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено. Формат: Артист - Название' });
+  if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено.' });
   res.json({ tracks });
 });
 
-// 11. Прокси картинок
+// 11. Обложки
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -455,18 +502,66 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. Стриминг (Только надежный scdl.download)
+// 12. СТРИМИНГ (Кэш на диске + Telegram)
 router.get('/stream', async (req, res) => {
-  try {
-    const trackUrl = req.query.url;
-    if (!trackUrl) throw new Error('Ссылка не передана');
+  const trackUrl = req.query.url;
+  if (!trackUrl) return res.status(400).send('URL required');
 
+  const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
+  const filePath = path.join(TRACKS_DIR, safeFileName);
+
+  // 1. Если файл есть локально - отдаем (перемотка работает идеально)
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  }
+
+  // 2. Проверяем в БД - есть ли file_id от Telegram
+  try {
+    const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
+    if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
+      const fileId = dbResult.rows[0].tg_file_id;
+      console.log(`[Stream] Качаем из TG: ${fileId}`);
+      try {
+        await downloadFromTelegram(fileId, filePath);
+        return res.sendFile(filePath);
+      } catch (e) {
+        console.log(`[Stream] TG ошибка, качаем заново: ${e.message}`);
+        await query('DELETE FROM track_cache WHERE track_url = $1', [trackUrl]);
+      }
+    }
+  } catch (e) {
+    console.log(`[Stream] БД ошибка: ${e.message}`);
+  }
+
+  // 3. Скачиваем с SoundCloud
+  try {
+    console.log(`[Stream] Скачиваем с SC: ${trackUrl}`);
     const stream = await scdl.download(trackUrl);
-    res.setHeader('Content-Type', 'audio/mpeg');
-    stream.pipe(res);
+    const writeStream = fs.createWriteStream(filePath);
+    stream.pipe(writeStream);
+
+    await new Promise((resolve, reject) => {
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+    });
+
+    // Пытаемся сохранить в Telegram
+    try {
+      const trackInfo = await scdl.getInfo(trackUrl).catch(() => ({}));
+      const fileId = await uploadToTelegram(filePath, trackInfo.title, trackInfo.user?.username);
+      await query(
+        'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
+        [trackUrl, fileId]
+      );
+      console.log(`[Stream] Успешно сохранено в TG: ${fileId}`);
+    } catch (tgErr) {
+      console.log(`[Stream] TG upload не удался: ${tgErr.message}`);
+    }
+
+    return res.sendFile(filePath);
   } catch (err) {
-    console.error('Ошибка стриминга:', err.message);
-    if (!res.headersSent) res.status(500).send('Ошибка стриминга');
+    console.error(`[Stream] Критическая ошибка: ${err.message}`);
+    if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
   }
 });
 
