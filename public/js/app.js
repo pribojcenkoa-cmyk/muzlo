@@ -513,7 +513,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (С индикатором загрузки, предзагрузкой и передачей метаданных)
+// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -539,11 +539,9 @@ function playTrack(track) {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration);
   seekSlider.value = 0;
 
-  // Включаем индикатор загрузки
   btnPlay.textContent = '⏳'; 
   isPlaying = false;
 
-  // Передаем метаданные в URL, чтобы сервер не делал лишний запрос getInfo
   const baseStreamUrl = getStreamUrl(track);
   const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`;
   
@@ -585,7 +583,7 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // --- ПРЕДЗАГРУЗКА СЛЕДУЮЩЕГО ТРЕКА ---
+  // Предзагрузка следующего трека
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -593,7 +591,6 @@ function playTrack(track) {
     if (nextTrack && nextTrack.stream_url) {
       const nextUrlWithMeta = `${nextTrack.stream_url}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`;
 
-      // 1. Предзагрузка на стороне браузера (скрытый Audio)
       if (!hiddenPreloader) {
         hiddenPreloader = new Audio();
         hiddenPreloader.preload = 'auto';
@@ -601,7 +598,6 @@ function playTrack(track) {
       hiddenPreloader.src = nextUrlWithMeta;
       hiddenPreloader.load();
 
-      // 2. Предзагрузка на стороне сервера (в фоне)
       if (nextTrack.permalink_url) {
         fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`).catch(() => {});
       }
@@ -609,7 +605,7 @@ function playTrack(track) {
   }
 }
 
-// Отображение процента загрузки на кнопке Play
+// Прогресс загрузки на кнопке Play
 audioPlayer.addEventListener('progress', () => {
   if (!isPlaying && btnPlay.textContent.startsWith('⏳')) {
     if (audioPlayer.buffered.length > 0) {
@@ -829,6 +825,10 @@ navLibrary.addEventListener('click', async () => {
 
 // Функция для отрисовки медиатеки (Альбомы + Треки)
 function renderLibraryPage(tracks, albums) {
+  // ФИКС: Обновляем текущий список треков и сбрасываем индекс
+  currentTracks = tracks || [];
+  currentTrackIndex = -1;
+
   trackListEl.innerHTML = '';
   
   // 1. Альбомы
@@ -910,6 +910,10 @@ function renderLibraryPage(tracks, albums) {
 
       div.addEventListener('click', (e) => {
         if (e.target.classList.contains('btn-delete')) return;
+        // ФИКС: Подсвечиваем активный трек и обновляем индекс
+        document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+        div.classList.add('active');
+        currentTrackIndex = index;
         playTrack(track);
       });
 
@@ -935,7 +939,7 @@ function renderLibraryPage(tracks, albums) {
   }
 }
 
-// 8. АВТОРИЗАЦИЯ (С выпадающим меню)
+// 8. АВТОРИЗАЦИЯ
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
   if (e.target.id === 'btn-logout') logout();
