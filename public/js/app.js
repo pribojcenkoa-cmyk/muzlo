@@ -82,6 +82,16 @@ const formatTime = (seconds) => {
 
 const getValidCover = (url) => url || '/img/default-cover.png';
 
+// Функция Фишера-Йетса для честного перемешивания
+function shuffleArray(array) {
+  const newArr = [...array];
+  for (let i = newArr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+  }
+  return newArr;
+}
+
 function getStreamUrl(track) {
   if (track.stream_url) return track.stream_url;
   if (track.is_external && track.file_url) return track.file_url;
@@ -705,7 +715,7 @@ window.addEventListener('popstate', (event) => {
     else if (event.state.tab === 'wave') navWave.click();
     else if (event.state.tab === 'profile') navProfile.click();
   } else {
-    navHome.click(); // Если истории нет, кидаем на главную
+    navHome.click(); 
   }
   isPoppingState = false;
 });
@@ -837,7 +847,6 @@ navLibrary.addEventListener('click', async () => {
 function renderLibraryPage(tracks, albums) {
   currentTracks = tracks || [];
   currentTrackIndex = -1;
-
   trackListEl.innerHTML = '';
   
   if (albums && albums.length > 0) {
@@ -895,7 +904,7 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
 
-    // Кнопки выбора воспроизведения
+    // Кнопки управления
     const controlsDiv = document.createElement('div');
     controlsDiv.style.display = 'flex';
     controlsDiv.style.gap = '10px';
@@ -907,21 +916,27 @@ function renderLibraryPage(tracks, albums) {
     `;
     trackListEl.appendChild(controlsDiv);
 
-    // Логика для кнопок
+    // Слушатели кнопок
     document.getElementById('lib-shuffle').addEventListener('click', () => {
-      currentTracks.sort(() => Math.random() - 0.5);
-      renderTracks(currentTracks, true);
-      playTrack(currentTracks[0]);
+      const shuffled = shuffleArray(tracks);
+      renderLibraryPage(shuffled, albums);
+      // Симулируем клик по первому треку, чтобы он заиграл
+      const firstEl = trackListEl.querySelector('.track-item');
+      if (firstEl) firstEl.click();
     });
+
     document.getElementById('lib-asc').addEventListener('click', () => {
-      // Изначально треки идут по убыванию (сверху новые). Для "сверху вниз" (старые сначала) реверсируем
-      renderTracks(currentTracks.slice().reverse(), true);
-      playTrack(currentTracks[currentTracks.length - 1]);
+      const ascTracks = [...tracks].sort((a, b) => new Date(a.added_at || 0) - new Date(b.added_at || 0));
+      renderLibraryPage(ascTracks, albums);
+      const firstEl = trackListEl.querySelector('.track-item');
+      if (firstEl) firstEl.click();
     });
+
     document.getElementById('lib-desc').addEventListener('click', () => {
-      // "Снизу вверх" (новые сначала) — это изначальный порядок из базы
-      renderTracks(currentTracks, true);
-      playTrack(currentTracks[0]);
+      const descTracks = [...tracks].sort((a, b) => new Date(b.added_at || 0) - new Date(a.added_at || 0));
+      renderLibraryPage(descTracks, albums);
+      const firstEl = trackListEl.querySelector('.track-item');
+      if (firstEl) firstEl.click();
     });
 
     tracks.forEach((track, index) => {
@@ -1295,7 +1310,6 @@ initAudioContext();
 restorePlayerState();
 checkAuth();
 
-// Проверяем хэш при загрузке страницы (если человек обновил страницу)
 const initialHash = window.location.hash.replace('#', '');
 if (initialHash === 'library') navLibrary.click();
 else if (initialHash === 'wave') navWave.click();
