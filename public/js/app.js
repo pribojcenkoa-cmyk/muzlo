@@ -50,6 +50,18 @@ let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 
+// --- MEDIA SESSION (РЕГИСТРАЦИЯ КНОПОК 1 РАЗ) ---
+if ('mediaSession' in navigator) {
+  try {
+    navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
+    navigator.mediaSession.setActionHandler('pause', () => { if (isPlaying) btnPlay.click(); });
+    navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
+    navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
+  } catch (error) {
+    console.log('Ошибка установки кнопок MediaSession:', error);
+  }
+}
+
 // Удаляем старый Service Worker и кэш
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(function(registrations) {
@@ -81,12 +93,6 @@ const formatTime = (seconds) => {
 };
 
 const getValidCover = (url) => url || '/img/default-cover.png';
-
-function getAbsoluteCover(url) {
-  const u = getValidCover(url);
-  if (u.startsWith('http')) return u;
-  return window.location.origin + u;
-}
 
 function shuffleArray(array) {
   const newArr = [...array];
@@ -176,9 +182,7 @@ async function loadAdminStats() {
       html += '</table>';
       usersContainer.innerHTML = html;
     }
-  } catch (err) {
-    console.error('Ошибка загрузки админ-статистики:', err);
-  }
+  } catch (err) {}
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -243,8 +247,6 @@ async function restorePlayerState() {
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
     btnPlay.textContent = '▶';
-
-    updateMediaSession(track);
 
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
@@ -507,7 +509,6 @@ async function loadAlbum(albumUrl) {
     document.getElementById('btn-back-search').addEventListener('click', () => performSearch(lastSearchQuery));
 
   } catch (err) {
-    console.error('Ошибка загрузки альбома:', err);
     trackListEl.innerHTML = `<p style="color:red; text-align:center; margin-top:40px;">${err.message}</p>`;
   }
 }
@@ -569,9 +570,10 @@ function playTrack(track) {
   btnPlay.textContent = '⏳';
   isPlaying = false;
 
-  audioPlayer.src = getStreamUrl(track);
-
+  // Установка Метаданных виджета ДО начала проигрывания
   updateMediaSession(track);
+
+  audioPlayer.src = getStreamUrl(track);
 
   audioPlayer.addEventListener('playing', () => {
     isPlaying = true;
@@ -585,15 +587,11 @@ function playTrack(track) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        track_id: track.id,
-        title: track.title,
-        artist_name: track.artist_name,
-        duration: track.duration,
-        genre: track.genre
+        track_id: track.id, title: track.title, artist_name: track.artist_name,
+        duration: track.duration, genre: track.genre
       })
-    }).catch(err => console.log('Не авторизован'));
+    }).catch(err => {});
   }).catch(err => {
-    console.warn('Автовоспроизведение заблокировано:', err.message);
     btnPlay.textContent = '▶';
     isPlaying = false;
   });
@@ -609,7 +607,7 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // Предзагрузка следующего трека для быстрого скипа
+  // Предзагрузка
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -624,43 +622,31 @@ function playTrack(track) {
   }
 }
 
-// --- MEDIA SESSION API ---
+// --- ФУНКЦИЯ УСТАНОВКИ ОБЛОЖКИ ВИДЖЕТА ---
 function updateMediaSession(track) {
   if (!('mediaSession' in navigator)) return;
-
-  const cover = getAbsoluteCover(track.cover_url);
-
-  navigator.mediaSession.metadata = new MediaMetadata({
-    title: track.title || 'Muzlo',
-    artist: track.artist_name || 'Неизвестен',
-    album: 'Muzlo',
-    artwork: [
-      { src: cover, sizes: '96x96', type: 'image/jpeg' },
-      { src: cover, sizes: '128x128', type: 'image/jpeg' },
-      { src: cover, sizes: '192x192', type: 'image/jpeg' },
-      { src: cover, sizes: '256x256', type: 'image/jpeg' },
-      { src: cover, sizes: '384x384', type: 'image/jpeg' },
-      { src: cover, sizes: '512x512', type: 'image/jpeg' }
-    ]
-  });
-
+  
   try {
-    navigator.mediaSession.setActionHandler('play', () => {
-      audioPlayer.play();
-      isPlaying = true;
-      btnPlay.textContent = '⏸';
-      navigator.mediaSession.playbackState = 'playing';
+    // Формируем абсолютный URL обложки (Android требует строго https://...)
+    const cover = track.cover_url 
+      ? (window.location.origin + track.cover_url) 
+      : (window.location.origin + '/img/default-cover.png');
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title || 'Muzlo',
+      artist: track.artist_name || 'Неизвестен',
+      album: 'Muzlo',
+      artwork: [
+        { src: cover, sizes: '96x96' },
+        { src: cover, sizes: '128x128' },
+        { src: cover, sizes: '192x192' },
+        { src: cover, sizes: '256x256' },
+        { src: cover, sizes: '384x384' },
+        { src: cover, sizes: '512x512' }
+      ]
     });
-    navigator.mediaSession.setActionHandler('pause', () => {
-      audioPlayer.pause();
-      isPlaying = false;
-      btnPlay.textContent = '▶';
-      navigator.mediaSession.playbackState = 'paused';
-    });
-    navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
-    navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
   } catch (e) {
-    console.log('MediaSession handlers:', e);
+    console.log('Ошибка метаданных MediaSession:', e);
   }
 }
 
@@ -741,7 +727,7 @@ audioPlayer.addEventListener('ended', () => {
 
 window.addEventListener('beforeunload', savePlayerState);
 
-// 7. НАВИГАЦИЯ (С ИСТОРИЕЙ)
+// 7. НАВИГАЦИЯ
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
@@ -773,9 +759,7 @@ navHome.addEventListener('click', async () => {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
     renderTracks(data.tracks);
-  } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает.</p>';
-  }
+  } catch (err) {}
 });
 
 navWave.addEventListener('click', async () => {
@@ -785,19 +769,11 @@ navWave.addEventListener('click', async () => {
   await loadUserLikes();
   try {
     const res = await fetch('/api/search/my-wave');
-    if (res.status === 401) {
-      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
-      return;
-    }
+    if (res.status === 401) { trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>'; return; }
     const data = await res.json();
-    if (data.error) {
-      trackListEl.innerHTML = `<p style="color:red; text-align:center; margin-top:40px;">${data.error}</p>`;
-      return;
-    }
+    if (data.error) { trackListEl.innerHTML = `<p style="color:red; text-align:center; margin-top:40px;">${data.error}</p>`; return; }
     renderTracks(data.tracks);
-  } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки волны.</p>';
-  }
+  } catch (err) {}
 });
 
 navProfile.addEventListener('click', async () => {
@@ -809,10 +785,7 @@ navProfile.addEventListener('click', async () => {
 
   try {
     const res = await fetch('/api/search/stats');
-    if (res.status === 401) {
-      profileStats.innerHTML = '<p style="color:red; text-align:center;">Войдите в аккаунт, чтобы увидеть статистику.</p>';
-      return;
-    }
+    if (res.status === 401) { profileStats.innerHTML = '<p style="color:red; text-align:center;">Войдите в аккаунт, чтобы увидеть статистику.</p>'; return; }
     const data = await res.json();
 
     const hours = Math.floor(data.total_seconds / 3600);
@@ -821,20 +794,16 @@ navProfile.addEventListener('click', async () => {
     profileStats.innerHTML = `
       <h2 style="margin-bottom: 20px;">Статистика прослушиваний</h2>
       <p style="font-size: 18px; margin-bottom: 20px;">Всего прослушано: <strong style="color:#1db954;">${hours} ч ${minutes} мин</strong></p>
-
       <h3 style="margin-bottom: 10px;">Топ артистов:</h3>
       <ul style="list-style: none; padding: 0; margin-bottom: 20px;">
         ${data.top_artists.map(a => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${escapeHTML(a.artist_name)} — <span style="color:#b3b3b3;">${a.count} раз</span></li>`).join('') || '<li>Нет данных</li>'}
       </ul>
-
       <h3 style="margin-bottom: 10px;">Топ треков:</h3>
       <ul style="list-style: none; padding: 0;">
         ${data.top_tracks.map(t => `<li style="padding: 5px 0; border-bottom: 1px solid #333;">${escapeHTML(t.title)} — <span style="color:#b3b3b3;">${escapeHTML(t.artist_name)} (${t.count} раз)</span></li>`).join('') || '<li>Нет данных</li>'}
       </ul>
     `;
-  } catch (err) {
-    profileStats.innerHTML = '<p style="color:red; text-align:center;">Ошибка загрузки статистики.</p>';
-  }
+  } catch (err) {}
 });
 
 navSearch.addEventListener('click', async () => {
@@ -855,10 +824,7 @@ searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const query = e.target.value.trim();
   lastSearchQuery = query;
-  if (query.length < 2) {
-    trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>';
-    return;
-  }
+  if (query.length < 2) { trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Введите хотя бы 2 символа</p>'; return; }
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ищем музыку...</p>';
   searchTimeout = setTimeout(() => performSearch(query), 600);
 });
@@ -868,23 +834,12 @@ navLibrary.addEventListener('click', async () => {
   switchTab(navLibrary, 'Моя медиатека');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   try {
-    const [resTracks, resAlbums] = await Promise.all([
-      fetch('/api/library'),
-      fetch('/api/library/albums')
-    ]);
-
-    if (resTracks.status === 401) {
-      trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>';
-      return;
-    }
-
+    const [resTracks, resAlbums] = await Promise.all([fetch('/api/library'), fetch('/api/library/albums')]);
+    if (resTracks.status === 401) { trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Войдите в аккаунт.</p>'; return; }
     const dataTracks = await resTracks.json();
     const dataAlbums = resAlbums.ok ? await resAlbums.json() : { albums: [] };
-
     renderLibraryPage(dataTracks.tracks || [], dataAlbums.albums || []);
-  } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка загрузки.</p>';
-  }
+  } catch (err) {}
 });
 
 function renderLibraryPage(tracks, albums) {
@@ -892,7 +847,6 @@ function renderLibraryPage(tracks, albums) {
   currentTrackIndex = -1;
   trackListEl.innerHTML = '';
 
-  // Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Сохраненные альбомы';
@@ -913,31 +867,21 @@ function renderLibraryPage(tracks, albums) {
         <div class="track-duration" style="font-size: 20px;">💿</div>
         <button class="btn-delete" title="Удалить">✕</button>
       `;
-      div.querySelector('.track-cover').onerror = function() {
-        this.onerror = null;
-        this.src = '/img/default-cover.png';
-      };
-      div.onclick = (e) => {
-        if (e.target.classList.contains('btn-delete')) return;
-        loadAlbum(album.permalink_url);
-      };
+      div.querySelector('.track-cover').onerror = function() { this.onerror = null; this.src = '/img/default-cover.png'; };
+      div.onclick = (e) => { if (e.target.classList.contains('btn-delete')) return; loadAlbum(album.permalink_url); };
       const deleteBtn = div.querySelector('.btn-delete');
       deleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Удалить этот альбом из медиатеки?')) return;
         try {
           const res = await fetch(`/api/library/albums/${album.album_id}`, { method: 'DELETE' });
-          if (res.ok) {
-            userSavedAlbumIds.delete(String(album.album_id));
-            navLibrary.click();
-          }
+          if (res.ok) { userSavedAlbumIds.delete(String(album.album_id)); navLibrary.click(); }
         } catch (err) {}
       });
       trackListEl.appendChild(div);
     });
   }
 
-  // Треки
   if (tracks && tracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Сохраненные треки';
@@ -946,27 +890,28 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
 
-    // Контейнер для кнопок — НЕ перерисовывается при сортировке
+    // Блок кнопок - СТРОГО НЕ ПЕРЕРИСОВЫВАЕТСЯ
     const controlsDiv = document.createElement('div');
     controlsDiv.id = 'library-controls';
     controlsDiv.style.display = 'flex';
     controlsDiv.style.gap = '10px';
     controlsDiv.style.marginBottom = '20px';
     controlsDiv.innerHTML = `
-      <button id="lib-shuffle" style="padding: 8px 16px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer;">🔀 Перемешать</button>
-      <button id="lib-asc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer;">⬇️ Сверху вниз</button>
-      <button id="lib-desc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer;">⬆️ Снизу вверх</button>
+      <button id="lib-shuffle" style="padding: 8px 16px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; flex-shrink: 0;">🔀 Перемешать</button>
+      <button id="lib-asc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; flex-shrink: 0;">⬇️ Сверху вниз</button>
+      <button id="lib-desc" style="padding: 8px 16px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; flex-shrink: 0;">⬆️ Снизу вверх</button>
     `;
     trackListEl.appendChild(controlsDiv);
 
-    // Контейнер только для треков — его и перерисовываем
+    // Контейнер для самих треков
     const tracksContainer = document.createElement('div');
     tracksContainer.id = 'library-tracks-container';
     trackListEl.appendChild(tracksContainer);
 
     renderLibraryTracks(currentTracks, tracksContainer);
 
-    document.getElementById('lib-shuffle').addEventListener('click', () => {
+    document.getElementById('lib-shuffle').addEventListener('click', (e) => {
+      e.preventDefault();
       const shuffled = shuffleArray(currentTracks);
       currentTracks = shuffled;
       currentTrackIndex = 0;
@@ -978,7 +923,8 @@ function renderLibraryPage(tracks, albums) {
       }
     });
 
-    document.getElementById('lib-asc').addEventListener('click', () => {
+    document.getElementById('lib-asc').addEventListener('click', (e) => {
+      e.preventDefault();
       const sorted = [...currentTracks].sort((a, b) => new Date(a.added_at || 0) - new Date(b.added_at || 0));
       currentTracks = sorted;
       currentTrackIndex = 0;
@@ -990,7 +936,8 @@ function renderLibraryPage(tracks, albums) {
       }
     });
 
-    document.getElementById('lib-desc').addEventListener('click', () => {
+    document.getElementById('lib-desc').addEventListener('click', (e) => {
+      e.preventDefault();
       const sorted = [...currentTracks].sort((a, b) => new Date(b.added_at || 0) - new Date(a.added_at || 0));
       currentTracks = sorted;
       currentTrackIndex = 0;
@@ -1023,10 +970,7 @@ function renderLibraryTracks(tracks, container) {
       <div class="track-duration">${formatTime(track.duration)}</div>
       <button class="btn-delete" title="Удалить">✕</button>
     `;
-    div.querySelector('.track-cover').onerror = function() {
-      this.onerror = null;
-      this.src = '/img/default-cover.png';
-    };
+    div.querySelector('.track-cover').onerror = function() { this.onerror = null; this.src = '/img/default-cover.png'; };
     div.addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-delete')) return;
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
@@ -1040,10 +984,7 @@ function renderLibraryTracks(tracks, container) {
       if (!confirm('Удалить этот трек?')) return;
       try {
         const res = await fetch(`/api/library/${track.track_id || track.id}`, { method: 'DELETE' });
-        if (res.ok) {
-          userLikedTrackIds.delete(String(track.track_id || track.id));
-          navLibrary.click();
-        }
+        if (res.ok) { userLikedTrackIds.delete(String(track.track_id || track.id)); navLibrary.click(); }
       } catch (err) {}
     });
     container.appendChild(div);
@@ -1065,7 +1006,6 @@ function updateAuthUI(user) {
           <div class="profile-email">${escapeHTML(user.email)}</div>
           <button class="btn-dropdown" id="btn-show-change-password">Сменить пароль</button>
           <button class="btn-dropdown btn-logout" id="btn-logout">Выйти</button>
-
           <div id="change-password-form" class="hidden" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
             <input type="password" id="old-password" placeholder="Старый пароль" style="width: 100%; margin-bottom: 5px; padding: 8px; background: #121212; color: white; border: 1px solid #333; border-radius: 4px; box-sizing: border-box;">
             <input type="password" id="new-password-profile" placeholder="Новый пароль" style="width: 100%; margin-bottom: 5px; padding: 8px; background: #121212; color: white; border: 1px solid #333; border-radius: 4px; box-sizing: border-box;">
@@ -1079,23 +1019,12 @@ function updateAuthUI(user) {
     const btnToggleProfile = document.getElementById('btn-toggle-profile');
     const profileDropdown = document.getElementById('profile-dropdown');
 
-    btnToggleProfile.addEventListener('click', (e) => {
-      e.stopPropagation();
-      profileDropdown.classList.toggle('hidden');
-    });
-
-    document.addEventListener('click', (e) => {
-      if (profileDropdown && !profileDropdown.contains(e.target) && e.target !== btnToggleProfile) {
-        profileDropdown.classList.add('hidden');
-      }
-    });
+    btnToggleProfile.addEventListener('click', (e) => { e.stopPropagation(); profileDropdown.classList.toggle('hidden'); });
+    document.addEventListener('click', (e) => { if (profileDropdown && !profileDropdown.contains(e.target) && e.target !== btnToggleProfile) profileDropdown.classList.add('hidden'); });
 
     const btnShowChangePass = document.getElementById('btn-show-change-password');
     const changePassForm = document.getElementById('change-password-form');
-
-    btnShowChangePass.addEventListener('click', () => {
-      changePassForm.classList.toggle('hidden');
-    });
+    btnShowChangePass.addEventListener('click', () => { changePassForm.classList.toggle('hidden'); });
 
     document.getElementById('btn-save-new-password').addEventListener('click', async () => {
       const oldPassword = document.getElementById('old-password').value;
@@ -1103,22 +1032,12 @@ function updateAuthUI(user) {
       if (!oldPassword || !newPassword) return alert('Заполните оба поля');
       try {
         const res = await fetch('/api/auth/change-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldPassword, newPassword })
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPassword, newPassword })
         });
         const data = await res.json();
-        if (res.ok) {
-          alert('Пароль успешно изменен!');
-          changePassForm.classList.add('hidden');
-          document.getElementById('old-password').value = '';
-          document.getElementById('new-password-profile').value = '';
-        } else {
-          alert(data.error);
-        }
-      } catch (e) {
-        alert('Ошибка сети');
-      }
+        if (res.ok) { alert('Пароль успешно изменен!'); changePassForm.classList.add('hidden'); document.getElementById('old-password').value = ''; document.getElementById('new-password-profile').value = ''; }
+        else { alert(data.error); }
+      } catch (e) { alert('Ошибка сети'); }
     });
 
     if (user.role === 'admin' && adminWidget) {
@@ -1152,9 +1071,7 @@ authForm.addEventListener('submit', async (e) => {
   const password = document.getElementById('auth-password').value;
   const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
-    });
+    const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Ошибка');
     authModal.classList.remove('active');
@@ -1173,10 +1090,7 @@ async function logout() {
 async function checkAuth() {
   try {
     const res = await fetch('/api/auth/me');
-    if (res.ok) {
-      const data = await res.json();
-      updateAuthUI(data.user);
-    }
+    if (res.ok) { const data = await res.json(); updateAuthUI(data.user); }
   } catch (err) {}
 }
 
@@ -1190,88 +1104,38 @@ const btnConfirmReset = document.getElementById('btn-confirm-reset');
 const authFormContainer = document.getElementById('auth-login-block');
 
 if (btnForgot) {
-  btnForgot.addEventListener('click', (e) => {
-    e.preventDefault();
-    if (authFormContainer) authFormContainer.style.display = 'none';
-    resetBlock.style.display = 'block';
-  });
-
-  btnBackToLogin.addEventListener('click', (e) => {
-    e.preventDefault();
-    if (authFormContainer) authFormContainer.style.display = 'block';
-    resetBlock.style.display = 'none';
-    resetStep2.style.display = 'none';
-    btnSendCode.style.display = 'block';
-    btnSendCode.textContent = 'Получить код';
-  });
-
+  btnForgot.addEventListener('click', (e) => { e.preventDefault(); if (authFormContainer) authFormContainer.style.display = 'none'; resetBlock.style.display = 'block'; });
+  btnBackToLogin.addEventListener('click', (e) => { e.preventDefault(); if (authFormContainer) authFormContainer.style.display = 'block'; resetBlock.style.display = 'none'; resetStep2.style.display = 'none'; btnSendCode.style.display = 'block'; btnSendCode.textContent = 'Получить код'; });
   btnSendCode.addEventListener('click', async () => {
     const email = document.getElementById('reset-email').value;
     if (!email) return alert('Введите почту');
-
-    btnSendCode.textContent = 'Отправка...';
-    btnSendCode.disabled = true;
+    btnSendCode.textContent = 'Отправка...'; btnSendCode.disabled = true;
     try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
+      const res = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
       const data = await res.json();
-      if (res.ok) {
-        alert('Код отправлен на почту! Проверьте папку Спам.');
-        resetStep2.style.display = 'block';
-        btnSendCode.style.display = 'none';
-      } else {
-        alert(data.error);
-        btnSendCode.textContent = 'Получить код';
-        btnSendCode.disabled = false;
-      }
-    } catch (e) {
-      alert('Ошибка сети');
-      btnSendCode.textContent = 'Получить код';
-      btnSendCode.disabled = false;
-    }
+      if (res.ok) { alert('Код отправлен на почту!'); resetStep2.style.display = 'block'; btnSendCode.style.display = 'none'; }
+      else { alert(data.error); btnSendCode.textContent = 'Получить код'; btnSendCode.disabled = false; }
+    } catch (e) { alert('Ошибка сети'); btnSendCode.textContent = 'Получить код'; btnSendCode.disabled = false; }
   });
-
   btnConfirmReset.addEventListener('click', async () => {
     const email = document.getElementById('reset-email').value;
     const code = document.getElementById('reset-code').value;
     const newPassword = document.getElementById('reset-new-password').value;
-
     try {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code, newPassword })
-      });
+      const res = await fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code, newPassword }) });
       const data = await res.json();
       if (res.ok) {
-        alert('Пароль успешно изменен! Войдите с новым паролем.');
+        alert('Пароль успешно изменен!');
         if (authFormContainer) authFormContainer.style.display = 'block';
-        resetBlock.style.display = 'none';
-        resetStep2.style.display = 'none';
-        btnSendCode.style.display = 'block';
-        btnSendCode.textContent = 'Получить код';
-        btnSendCode.disabled = false;
-        authForm.reset();
-      } else {
-        alert(data.error);
-      }
-    } catch (e) {
-      alert('Ошибка сети');
-    }
+        resetBlock.style.display = 'none'; resetStep2.style.display = 'none'; btnSendCode.style.display = 'block'; btnSendCode.textContent = 'Получить код'; btnSendCode.disabled = false; authForm.reset();
+      } else { alert(data.error); }
+    } catch (e) { alert('Ошибка сети'); }
   });
 }
 
 // 9. ИМПОРТ
 if (importBtn) {
-  importBtn.addEventListener('click', () => {
-    importModal.classList.add('active');
-    importStatus.textContent = '';
-    importUrlInput.value = '';
-    importTextInput.value = '';
-  });
+  importBtn.addEventListener('click', () => { importModal.classList.add('active'); importStatus.textContent = ''; importUrlInput.value = ''; importTextInput.value = ''; });
 }
 
 btnCloseImport.addEventListener('click', () => importModal.classList.remove('active'));
@@ -1282,86 +1146,35 @@ btnDoImport.addEventListener('click', async () => {
   const text = importTextInput.value.trim();
 
   if (text) {
-    importStatus.style.color = '#1db954';
-    importStatus.textContent = 'Ищем треки в SoundCloud...';
-    btnDoImport.disabled = true;
-
+    importStatus.style.color = '#1db954'; importStatus.textContent = 'Ищем треки в SoundCloud...'; btnDoImport.disabled = true;
     try {
-      const res = await fetch('/api/search/import-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
+      const res = await fetch('/api/search/import-text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
       const data = await res.json();
-
       if (data.tracks && data.tracks.length > 0) {
         importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
-        setTimeout(() => {
-          importModal.classList.remove('active');
-          switchTab(navSearch, 'Импортированные треки', false);
-          renderTracks(data.tracks);
-          btnDoImport.disabled = false;
-          importTextInput.value = '';
-        }, 1500);
-      } else {
-        importStatus.style.color = '#ff4d4d';
-        importStatus.textContent = data.error || 'Ничего не найдено.';
-        btnDoImport.disabled = false;
-      }
-    } catch (err) {
-      importStatus.style.color = '#ff4d4d';
-      importStatus.textContent = 'Ошибка соединения.';
-      btnDoImport.disabled = false;
-    }
+        setTimeout(() => { importModal.classList.remove('active'); switchTab(navSearch, 'Импортированные треки', false); renderTracks(data.tracks); btnDoImport.disabled = false; importTextInput.value = ''; }, 1500);
+      } else { importStatus.style.color = '#ff4d4d'; importStatus.textContent = data.error || 'Ничего не найдено.'; btnDoImport.disabled = false; }
+    } catch (err) { importStatus.style.color = '#ff4d4d'; importStatus.textContent = 'Ошибка соединения.'; btnDoImport.disabled = false; }
     return;
   }
 
-  if (!url) {
-    importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Введите ссылку или вставьте список треков';
-    return;
-  }
+  if (!url) { importStatus.style.color = '#ff4d4d'; importStatus.textContent = 'Введите ссылку или вставьте список'; return; }
 
-  let cleanUrl = url;
-  if (cleanUrl.includes('?')) cleanUrl = cleanUrl.split('?')[0];
-
+  let cleanUrl = url; if (cleanUrl.includes('?')) cleanUrl = cleanUrl.split('?')[0];
   let endpoint = '';
-  if (cleanUrl.includes('soundcloud.com')) {
-    endpoint = `/api/search/import-likes?url=${encodeURIComponent(cleanUrl)}`;
-  } else if (cleanUrl.includes('music.yandex.ru')) {
-    endpoint = `/api/search/import-yandex?url=${encodeURIComponent(cleanUrl)}`;
-  } else {
-    importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Вставьте ссылку SoundCloud/Яндекс или список треков';
-    return;
-  }
+  if (cleanUrl.includes('soundcloud.com')) endpoint = `/api/search/import-likes?url=${encodeURIComponent(cleanUrl)}`;
+  else if (cleanUrl.includes('music.yandex.ru')) endpoint = `/api/search/import-yandex?url=${encodeURIComponent(cleanUrl)}`;
+  else { importStatus.style.color = '#ff4d4d'; importStatus.textContent = 'Вставьте ссылку SoundCloud/Яндекс'; return; }
 
-  importStatus.style.color = '#1db954';
-  importStatus.textContent = 'Загрузка... Пожалуйста, подождите.';
-  btnDoImport.disabled = true;
+  importStatus.style.color = '#1db954'; importStatus.textContent = 'Загрузка... Пожалуйста, подождите.'; btnDoImport.disabled = true;
 
   try {
-    const res = await fetch(endpoint);
-    const data = await res.json();
-
+    const res = await fetch(endpoint); const data = await res.json();
     if (data.tracks && data.tracks.length > 0) {
       importStatus.textContent = `Успех! Найдено треков: ${data.tracks.length}`;
-      setTimeout(() => {
-        importModal.classList.remove('active');
-        switchTab(navSearch, 'Импортированные треки', false);
-        renderTracks(data.tracks);
-        btnDoImport.disabled = false;
-      }, 1500);
-    } else {
-      importStatus.style.color = '#ff4d4d';
-      importStatus.textContent = data.error || 'Треки не найдены.';
-      btnDoImport.disabled = false;
-    }
-  } catch (err) {
-    importStatus.style.color = '#ff4d4d';
-    importStatus.textContent = 'Ошибка соединения.';
-    btnDoImport.disabled = false;
-  }
+      setTimeout(() => { importModal.classList.remove('active'); switchTab(navSearch, 'Импортированные треки', false); renderTracks(data.tracks); btnDoImport.disabled = false; }, 1500);
+    } else { importStatus.style.color = '#ff4d4d'; importStatus.textContent = data.error || 'Треки не найдены.'; btnDoImport.disabled = false; }
+  } catch (err) { importStatus.style.color = '#ff4d4d'; importStatus.textContent = 'Ошибка соединения.'; btnDoImport.disabled = false; }
 });
 
 // 10. СТАРТ
