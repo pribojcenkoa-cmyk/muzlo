@@ -1,7 +1,5 @@
 import { Router } from 'express';
 import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
 import { createRequire } from 'module';
 import { query } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -12,14 +10,6 @@ const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
 
-const TRACKS_DIR = path.join(process.cwd(), 'storage', 'tracks');
-if (!fs.existsSync(TRACKS_DIR)) {
-  fs.mkdirSync(TRACKS_DIR, { recursive: true });
-}
-
-const downloadLocks = new Map();
-const uploadLocks = new Map();
-
 const POPULAR_ARTISTS = [
   'Onda Andar', 'Sematary', 'Kizaru', 'Miyagi', 'Andy Panda', 'Scriptonite', 
   'Boulevard Depo', 'Pharaoh', 'FACE', 'LSP', 'Markul', 'T-Fest', 
@@ -28,104 +18,6 @@ const POPULAR_ARTISTS = [
   'Kanye West', 'Eminem', 'Playboi Carti', '21 Savage', 'Metro Boomin',
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
-
-// ============ TELEGRAM ХРАНИЛИЩЕ ============
-async function uploadToTelegram(filePath, trackTitle, artistName) {
-  const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
-  const TG_CHAT_ID = process.env.TG_CHAT_ID;
-  if (!TG_BOT_TOKEN || !TG_CHAT_ID) throw new Error('TG не настроен');
-
-  const fileBuffer = fs.readFileSync(filePath);
-  const formData = new FormData();
-  formData.append('chat_id', TG_CHAT_ID);
-  formData.append('audio', new Blob([fileBuffer], { type: 'audio/mpeg' }), 'track.mp3');
-  formData.append('title', trackTitle || 'Unknown');
-  formData.append('performer', artistName || 'Unknown');
-  
-  const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendAudio`, {
-    method: 'POST',
-    body: formData
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(`TG upload failed: ${JSON.stringify(data)}`);
-  return data.result.audio.file_id;
-}
-
-async function downloadFromTelegram(fileId, destPath) {
-  const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
-  const infoRes = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const infoData = await infoRes.json();
-  if (!infoData.ok) throw new Error('TG getFile failed');
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${TG_BOT_TOKEN}/${infoData.result.file_path}`);
-  if (!fileRes.ok) throw new Error('TG download failed');
-  const buffer = await fileRes.arrayBuffer();
-  fs.writeFileSync(destPath, Buffer.from(buffer));
-}
-
-async function uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist) {
-  if (uploadLocks.has(trackUrl)) {
-    try { await uploadLocks.get(trackUrl); } catch (e) {}
-    return;
-  }
-
-  try {
-    const dbCheck = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
-    if (dbCheck.rows.length > 0 && dbCheck.rows[0].tg_file_id) return;
-  } catch (e) {}
-
-  const uploadPromise = (async () => {
-    try {
-      const fileId = await uploadToTelegram(filePath, trackTitle, trackArtist);
-      await query(
-        'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
-        [trackUrl, fileId]
-      );
-      console.log(`[TG] Успешно загружен: ${trackUrl}`);
-    } catch (e) {
-      console.log(`[TG] Ошибка загрузки: ${e.message}`);
-    }
-  })();
-
-  uploadLocks.set(trackUrl, uploadPromise);
-  try { await uploadPromise; } finally { uploadLocks.delete(trackUrl); }
-}
-
-async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
-  const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
-  const filePath = path.join(TRACKS_DIR, safeFileName);
-
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) return filePath;
-
-  if (downloadLocks.has(trackUrl)) {
-    try { await downloadLocks.get(trackUrl); } catch (e) {}
-    if (fs.existsSync(filePath)) return filePath;
-  }
-
-  const downloadPromise = (async () => {
-    try {
-      const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
-      if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
-        await downloadFromTelegram(dbResult.rows[0].tg_file_id, filePath);
-        return;
-      }
-    } catch (e) {}
-
-    const stream = await scdl.download(trackUrl);
-    const writeStream = fs.createWriteStream(filePath);
-    await new Promise((resolve, reject) => {
-      stream.pipe(writeStream);
-      writeStream.on('finish', resolve);
-      writeStream.on('error', reject);
-    });
-
-    uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
-  })();
-
-  downloadLocks.set(trackUrl, downloadPromise);
-  try { await downloadPromise; } finally { downloadLocks.delete(trackUrl); }
-  return filePath;
-}
-// ============================================
 
 function formatTrack(track) {
   if (!track) return null;
@@ -206,27 +98,6 @@ router.get('/album', async (req, res) => {
       if (playlist && playlist.tracks && playlist.tracks.length > 0) {
         const validTracks = playlist.tracks.filter(t => t && t.permalink_url).map(track => formatTrack(track)).filter(Boolean);
         if (validTracks.length > 0) return res.json({ tracks: validTracks });
-      }
-    } catch (e) {}
-    try {
-      const jinaUrl = `https://r.jina.ai/${albumUrl}`;
-      const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' }, timeout: 15000 });
-      let html = jinaRes.data;
-      if (html && typeof html === 'string' && html.includes('window.__sc_hydration')) {
-          const startStr = 'window.__sc_hydration = ';
-          const startIndex = html.indexOf(startStr);
-          const endIndex = html.indexOf('</script>', startIndex);
-          let jsonStr = html.substring(startIndex + startStr.length, endIndex).trim();
-          if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
-          const hydration = JSON.parse(jsonStr);
-          const playlistData = hydration.find(item => item.hydratable === 'playlist' || item.hydratable === 'playlistInfo');
-          if (playlistData && playlistData.data) {
-              const tracksData = playlistData.data.tracks || (playlistData.data.playlist && playlistData.data.playlist.tracks);
-              if (tracksData) {
-                 const tracks = tracksData.filter(t => t && t.duration).map(track => formatTrack(track));
-                 return res.json({ tracks });
-              }
-          }
       }
     } catch (e) {}
     try {
@@ -467,75 +338,16 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. PRECACHE
-router.get('/precache', async (req, res) => {
-  const trackUrl = req.query.url;
-  const trackTitle = req.query.title || 'Unknown';
-  const trackArtist = req.query.artist || 'Unknown';
-  if (!trackUrl) return res.status(400).send('URL required');
-
-  res.send('Precache started');
-
-  try {
-    await ensureTrackOnDisk(trackUrl, trackTitle, trackArtist);
-    console.log(`[Precache] Готово: ${trackUrl}`);
-  } catch (e) {
-    console.log(`[Precache] Ошибка: ${e.message}`);
-  }
-});
-
-// 13. СТРИМИНГ (Мгновенный + фоновое кэширование)
+// 12. СТРИМИНГ (Простой, мгновенный)
 router.get('/stream', async (req, res) => {
-  const trackUrl = req.query.url;
-  const trackTitle = req.query.title || 'Unknown';
-  const trackArtist = req.query.artist || 'Unknown';
-  
-  if (!trackUrl) return res.status(400).send('URL required');
-
-  const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
-  const filePath = path.join(TRACKS_DIR, safeFileName);
-
-  // 1. Файл уже на диске → sendFile (перемотка работает)
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
-    return res.sendFile(filePath);
-  }
-
-  // 2. Файл качается (precache) → ждём и отдаем (перемотка будет)
-  if (downloadLocks.has(trackUrl)) {
-    try {
-      await downloadLocks.get(trackUrl);
-      if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
-        return res.sendFile(filePath);
-      }
-    } catch (e) {}
-  }
-
-  // 3. Мгновенный стрим + фоновая запись на диск
   try {
-    console.log(`[Stream] Direct: ${trackUrl}`);
+    const trackUrl = req.query.url;
+    if (!trackUrl) throw new Error('Ссылка не передана');
     const stream = await scdl.download(trackUrl);
-    
     res.setHeader('Content-Type', 'audio/mpeg');
     stream.pipe(res);
-    
-    const writeStream = fs.createWriteStream(filePath);
-    stream.pipe(writeStream);
-    
-    const lockPromise = new Promise((resolve) => {
-      writeStream.on('finish', () => {
-        uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
-        resolve();
-      });
-      writeStream.on('error', resolve);
-      stream.on('error', resolve);
-    });
-    
-    downloadLocks.set(trackUrl, lockPromise);
-    lockPromise.finally(() => downloadLocks.delete(trackUrl));
-
   } catch (err) {
-    console.error(`[Stream] Error: ${err.message}`);
-    if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
+    if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
 
