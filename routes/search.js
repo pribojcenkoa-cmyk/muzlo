@@ -17,6 +17,10 @@ if (!fs.existsSync(TRACKS_DIR)) {
   fs.mkdirSync(TRACKS_DIR, { recursive: true });
 }
 
+// Блокировки для скачивания и загрузки
+const downloadLocks = new Map();
+const uploadLocks = new Map();
+
 const POPULAR_ARTISTS = [
   'Onda Andar', 'Sematary', 'Kizaru', 'Miyagi', 'Andy Panda', 'Scriptonite', 
   'Boulevard Depo', 'Pharaoh', 'FACE', 'LSP', 'Markul', 'T-Fest', 
@@ -26,11 +30,10 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// ============ TELEGRAM ХРАНИЛИЩЕ ============
+// ============ TELEGRAM ============
 async function uploadToTelegram(filePath, trackTitle, artistName) {
   const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
   const TG_CHAT_ID = process.env.TG_CHAT_ID;
-  
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) throw new Error('TG не настроен');
 
   const fileBuffer = fs.readFileSync(filePath);
@@ -44,27 +47,96 @@ async function uploadToTelegram(filePath, trackTitle, artistName) {
     method: 'POST',
     body: formData
   });
-  
   const data = await res.json();
   if (!data.ok) throw new Error(`TG upload failed: ${JSON.stringify(data)}`);
-  
   return data.result.audio.file_id;
 }
 
 async function downloadFromTelegram(fileId, destPath) {
   const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
-  
   const infoRes = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const infoData = await infoRes.json();
   if (!infoData.ok) throw new Error('TG getFile failed');
-  
-  const filePath = infoData.result.file_path;
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${TG_BOT_TOKEN}/${filePath}`);
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${TG_BOT_TOKEN}/${infoData.result.file_path}`);
   if (!fileRes.ok) throw new Error('TG download failed');
-  
   const buffer = await fileRes.arrayBuffer();
   fs.writeFileSync(destPath, Buffer.from(buffer));
 }
+
+// Функция загрузки в TG с блокировкой (защита от дублей)
+async function uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist) {
+  // Если уже загружается — ждем
+  if (uploadLocks.has(trackUrl)) {
+    try { await uploadLocks.get(trackUrl); } catch (e) {}
+    return;
+  }
+
+  // Если уже есть в БД — не загружаем повторно
+  try {
+    const dbCheck = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
+    if (dbCheck.rows.length > 0 && dbCheck.rows[0].tg_file_id) {
+      return; // Уже загружено
+    }
+  } catch (e) {}
+
+  // Начинаем загрузку с блокировкой
+  const uploadPromise = (async () => {
+    try {
+      const fileId = await uploadToTelegram(filePath, trackTitle, trackArtist);
+      await query(
+        'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
+        [trackUrl, fileId]
+      );
+      console.log(`[TG] Успешно загружен: ${trackUrl}`);
+    } catch (e) {
+      console.log(`[TG] Ошибка загрузки: ${e.message}`);
+    }
+  })();
+
+  uploadLocks.set(trackUrl, uploadPromise);
+  try { await uploadPromise; } finally { uploadLocks.delete(trackUrl); }
+}
+
+// Универсальная функция: скачать трек на диск (с блокировкой)
+async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
+  const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
+  const filePath = path.join(TRACKS_DIR, safeFileName);
+
+  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) return filePath;
+
+  if (downloadLocks.has(trackUrl)) {
+    try { await downloadLocks.get(trackUrl); } catch (e) {}
+    if (fs.existsSync(filePath)) return filePath;
+  }
+
+  const downloadPromise = (async () => {
+    // 1. Из Telegram (если есть)
+    try {
+      const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
+      if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
+        await downloadFromTelegram(dbResult.rows[0].tg_file_id, filePath);
+        return;
+      }
+    } catch (e) {}
+
+    // 2. С SoundCloud
+    const stream = await scdl.download(trackUrl);
+    const writeStream = fs.createWriteStream(filePath);
+    await new Promise((resolve, reject) => {
+      stream.pipe(writeStream);
+      writeStream.on('finish', resolve);
+      writeStream.on('error', reject);
+    });
+
+    // 3. Загружаем в TG через Safe-функцию (не будет дублей)
+    uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
+  })();
+
+  downloadLocks.set(trackUrl, downloadPromise);
+  try { await downloadPromise; } finally { downloadLocks.delete(trackUrl); }
+  return filePath;
+}
+
 // ============================================
 
 function formatTrack(track) {
@@ -87,7 +159,6 @@ async function searchSoundCloud(q, offset = 0) {
   const searchResult = await scdl.search({
     query: q, resourceType: 'tracks', limit: 50, offset: offset
   });
-
   return searchResult.collection
     .filter(track => track.duration < 900000)
     .map(track => formatTrack(track));
@@ -110,7 +181,7 @@ router.get('/trending', async (req, res) => {
   }
 });
 
-// 2. Поиск (ТРЕКИ + АЛЬБОМЫ)
+// 2. Поиск
 router.get('/', async (req, res) => {
   const q = req.query.q;
   if (!q) return res.json({ tracks: [], albums: [] });
@@ -119,36 +190,29 @@ router.get('/', async (req, res) => {
       searchSoundCloud(q).catch(() => []),
       scdl.search({ query: q, resourceType: 'playlists', limit: 20 }).catch(() => ({ collection: [] }))
     ]);
-
     const albums = playlistsRes.collection
       .filter(pl => pl.permalink_url)
       .map(pl => {
         let cover = pl.artwork_url || (pl.user && pl.user.avatar_url);
         if (cover) cover = cover.replace('large', 't500x500');
         return {
-          id: pl.id,
-          title: pl.title,
-          artist_name: pl.user ? pl.user.username : 'Неизвестен',
+          id: pl.id, title: pl.title, artist_name: pl.user ? pl.user.username : 'Неизвестен',
           cover_url: cover ? `/api/search/cover?url=${encodeURIComponent(cover)}` : null,
-          track_count: pl.track_count,
-          permalink_url: pl.permalink_url,
-          is_album: true
+          track_count: pl.track_count, permalink_url: pl.permalink_url, is_album: true
         };
       });
-
     res.json({ tracks, albums });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка поиска' });
   }
 });
 
-// 2.1. Загрузка треков конкретного альбома
+// 2.1. Альбом
 router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
     if (!albumUrl || albumUrl === 'undefined') return res.status(400).json({ error: 'URL не передан' });
     albumUrl = albumUrl.split('?')[0];
-
     try {
       const playlist = await scdl.getSetInfo(albumUrl);
       if (playlist && playlist.tracks && playlist.tracks.length > 0) {
@@ -156,7 +220,6 @@ router.get('/album', async (req, res) => {
         if (validTracks.length > 0) return res.json({ tracks: validTracks });
       }
     } catch (e) {}
-
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' }, timeout: 15000 });
@@ -178,7 +241,6 @@ router.get('/album', async (req, res) => {
           }
       }
     } catch (e) {}
-
     try {
       const jinaUrl = `https://r.jina.ai/${albumUrl}`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 15000 });
@@ -188,20 +250,14 @@ router.get('/album', async (req, res) => {
         const p = u.replace('https://soundcloud.com/', '').split('/');
         return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
       });
-
       if (trackUrls.length > 0) {
         const tracks = [];
         for (const tUrl of trackUrls) {
-          try {
-            const info = await scdl.getInfo(tUrl);
-            const formatted = formatTrack(info);
-            if (formatted) tracks.push(formatted);
-          } catch (e) {}
+          try { const info = await scdl.getInfo(tUrl); const formatted = formatTrack(info); if (formatted) tracks.push(formatted); } catch (e) {}
         }
         if (tracks.length > 0) return res.json({ tracks });
       }
     } catch (e) {}
-
     throw new Error('Все методы исчерпаны');
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки альбома.' });
@@ -220,7 +276,7 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. Страница артиста
+// 4. Артист
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
@@ -237,55 +293,31 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Моя волна
+// 5. Волна
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const topArtists = await query(
-      `SELECT artist_name, COUNT(*) as play_count 
-       FROM listening_history 
-       WHERE user_id = $1 AND artist_name IS NOT NULL 
-       GROUP BY artist_name 
-       ORDER BY play_count DESC 
-       LIMIT 7`,
-      [req.user.id]
-    );
-
+      `SELECT artist_name, COUNT(*) as play_count FROM listening_history 
+       WHERE user_id = $1 AND artist_name IS NOT NULL GROUP BY artist_name 
+       ORDER BY play_count DESC LIMIT 7`, [req.user.id]);
     let baseArtists = topArtists.rows.map(r => r.artist_name);
-
     if (baseArtists.length < 5) {
-      const liked = await query(
-        'SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5',
-        [req.user.id]
-      );
+      const liked = await query('SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5', [req.user.id]);
       baseArtists = [...new Set([...baseArtists, ...liked.rows.map(r => r.artist_name)])];
     }
-
-    if (baseArtists.length === 0) {
-      baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
-    }
-
-    const randomPopular = POPULAR_ARTISTS
-      .sort(() => 0.5 - Math.random())
-      .filter(a => !baseArtists.includes(a))
-      .slice(0, 3);
-    
+    if (baseArtists.length === 0) baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
+    const randomPopular = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).filter(a => !baseArtists.includes(a)).slice(0, 3);
     const allArtists = [...baseArtists, ...randomPopular];
-
     let allTracks = [];
     for (const artist of allArtists) {
       if (!artist || artist === 'Неизвестен') continue;
       try {
         const tracks = await searchSoundCloud(artist);
-        const filtered = tracks.filter(t => 
-          t.artist_name.toLowerCase().includes(artist.toLowerCase()) || 
-          artist.toLowerCase().includes(t.artist_name.toLowerCase())
-        );
+        const filtered = tracks.filter(t => t.artist_name.toLowerCase().includes(artist.toLowerCase()) || artist.toLowerCase().includes(t.artist_name.toLowerCase()));
         allTracks = allTracks.concat(filtered.sort(() => 0.5 - Math.random()).slice(0, 10));
       } catch (e) {}
     }
-
-    const shuffled = allTracks.sort(() => 0.5 - Math.random());
-    res.json({ tracks: shuffled.slice(0, 40) });
+    res.json({ tracks: allTracks.sort(() => 0.5 - Math.random()).slice(0, 40) });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
@@ -296,11 +328,7 @@ router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration } = req.body;
     if (!track_id) return res.status(400).json({ error: 'Нет ID трека' });
-
-    await query(
-      'INSERT INTO listening_history (user_id, track_id, title, artist_name, duration) VALUES ($1, $2, $3, $4, $5)',
-      [req.user.id, String(track_id), title, artist_name, duration]
-    );
+    await query('INSERT INTO listening_history (user_id, track_id, title, artist_name, duration) VALUES ($1, $2, $3, $4, $5)', [req.user.id, String(track_id), title, artist_name, duration]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка сохранения истории' });
@@ -310,25 +338,9 @@ router.post('/history', requireAuth, async (req, res) => {
 // 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
-    const totalTime = await query(
-      'SELECT SUM(duration) as total FROM listening_history WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    const topArtists = await query(
-      `SELECT artist_name, COUNT(*) as count FROM listening_history 
-       WHERE user_id = $1 AND artist_name IS NOT NULL 
-       GROUP BY artist_name ORDER BY count DESC LIMIT 5`,
-      [req.user.id]
-    );
-
-    const topTracks = await query(
-      `SELECT title, artist_name, COUNT(*) as count FROM listening_history 
-       WHERE user_id = $1 
-       GROUP BY title, artist_name ORDER BY count DESC LIMIT 5`,
-      [req.user.id]
-    );
-
+    const totalTime = await query('SELECT SUM(duration) as total FROM listening_history WHERE user_id = $1', [req.user.id]);
+    const topArtists = await query(`SELECT artist_name, COUNT(*) as count FROM listening_history WHERE user_id = $1 AND artist_name IS NOT NULL GROUP BY artist_name ORDER BY count DESC LIMIT 5`, [req.user.id]);
+    const topTracks = await query(`SELECT title, artist_name, COUNT(*) as count FROM listening_history WHERE user_id = $1 GROUP BY title, artist_name ORDER BY count DESC LIMIT 5`, [req.user.id]);
     res.json({
       total_seconds: parseInt(totalTime.rows[0].total || 0),
       top_artists: topArtists.rows,
@@ -343,64 +355,44 @@ router.get('/stats', requireAuth, async (req, res) => {
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
-
-  let url = rawUrl.split('?')[0].split('#')[0].replace(/\/$/, '');
-  url = url.replace('/likes', '');
-
+  let url = rawUrl.split('?')[0].split('#')[0].replace(/\/$/, '').replace('/likes', '');
   try {
     if (url.includes('on.soundcloud.com')) {
       try {
         const info = await scdl.getInfo(url);
-        if (info && info.permalink_url) {
-          url = info.permalink_url.split('?')[0].replace(/\/$/, '');
-        }
+        if (info && info.permalink_url) url = info.permalink_url.split('?')[0].replace(/\/$/, '');
       } catch (e) {
         return res.status(400).json({ error: 'Не удалось открыть короткую ссылку.' });
       }
     }
-
     if (url.includes('/sets/')) {
       const playlist = await scdl.getSetInfo(url);
-      const tracks = playlist.tracks.map(track => formatTrack(track)).filter(Boolean);
-      return res.json({ tracks });
+      return res.json({ tracks: playlist.tracks.map(track => formatTrack(track)).filter(Boolean) });
     }
-
     const parts = url.replace('https://soundcloud.com/', '').replace('http://soundcloud.com/', '').split('/');
     if (parts.length >= 2) {
       const info = await scdl.getInfo(url);
       return res.json({ tracks: [formatTrack(info)] });
     }
-
     const username = parts[0];
     let tracks = [];
-    
     try {
       const jinaUrl = `https://r.jina.ai/https://soundcloud.com/${username}/likes`;
       const jinaRes = await axios.get(jinaUrl, { headers: { 'Accept': 'text/plain' }, timeout: 20000 });
       const text = jinaRes.data;
       const urlMatches = text.match(/https:\/\/soundcloud\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/g) || [];
-      
       const trackUrls = [...new Set(urlMatches)].filter(u => {
         const p = u.replace('https://soundcloud.com/', '').split('/');
         return p.length === 2 && !['likes', 'sets', 'reposts', 'tracks', 'albums'].includes(p[1]);
       });
-
       if (trackUrls.length > 0) {
         for (const trackUrl of trackUrls.slice(0, 40)) {
-          try {
-            const info = await scdl.getInfo(trackUrl);
-            tracks.push(formatTrack(info));
-          } catch (e) {}
+          try { const info = await scdl.getInfo(trackUrl); tracks.push(formatTrack(info)); } catch (e) {}
         }
       }
     } catch (jinaErr) {}
-
-    if (tracks.length > 0) {
-      return res.json({ tracks });
-    } else {
-      throw new Error('Не удалось найти треки');
-    }
-
+    if (tracks.length > 0) return res.json({ tracks });
+    throw new Error('Не удалось найти треки');
   } catch (err) { 
     res.status(400).json({ error: 'SoundCloud заблокировал запросы.' }); 
   }
@@ -410,10 +402,8 @@ router.get('/import-likes', async (req, res) => {
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) return res.status(400).json({ error: 'Ссылка не с Яндекса' });
-
   let parsedTracks = [];
   let apiUrl = null;
-  
   if (url.includes('/users/')) {
     const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
     if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${match[1]}&kinds=${match[2]}&lang=ru`;
@@ -421,13 +411,11 @@ router.get('/import-yandex', async (req, res) => {
     const match = url.match(/playlists\/([a-zA-Z0-9-]+)/);
     if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?uuid=${match[1]}&lang=ru`;
   }
-
   if (apiUrl) {
     const PROXIES = [
       `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(apiUrl)}`,
       `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`
     ];
-
     for (const proxyUrl of PROXIES) {
       try {
         const response = await axios.get(proxyUrl, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }, timeout: 8000 });
@@ -438,7 +426,6 @@ router.get('/import-yandex', async (req, res) => {
       } catch (err) {}
     }
   }
-
   if (parsedTracks.length === 0) {
     try {
       const jinaUrl = `https://r.jina.ai/${url}`;
@@ -453,9 +440,7 @@ router.get('/import-yandex', async (req, res) => {
       }
     } catch (err) {}
   }
-
   if (parsedTracks.length === 0) return res.status(404).json({ error: 'Яндекс блокирует запросы.' });
-
   const tracks = [];
   for (const track of parsedTracks) {
     if (!track.title) continue;
@@ -465,7 +450,6 @@ router.get('/import-yandex', async (req, res) => {
       if (found.length > 0) tracks.push(found[0]);
     } catch (e) {}
   }
-
   if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено в SoundCloud.' });
   res.json({ tracks });
 });
@@ -474,17 +458,11 @@ router.get('/import-yandex', async (req, res) => {
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
   if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список' });
-
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 3);
   const tracks = [];
-
   for (const line of lines) {
-    try {
-      const found = await searchSoundCloud(line);
-      if (found.length > 0) tracks.push(found[0]);
-    } catch (e) {}
+    try { const found = await searchSoundCloud(line); if (found.length > 0) tracks.push(found[0]); } catch (e) {}
   }
-
   if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено.' });
   res.json({ tracks });
 });
@@ -501,95 +479,50 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. ПРЕДЗАГРУЗКА (Pre-cache)
+// 12. PRECACHE
 router.get('/precache', async (req, res) => {
   const trackUrl = req.query.url;
+  const trackTitle = req.query.title || 'Unknown';
+  const trackArtist = req.query.artist || 'Unknown';
   if (!trackUrl) return res.status(400).send('URL required');
 
-  const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
-  const filePath = path.join(TRACKS_DIR, safeFileName);
-
-  if (fs.existsSync(filePath)) return res.send('Already cached');
+  res.send('Precache started');
 
   try {
-    const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
-    if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
-      const fileId = dbResult.rows[0].tg_file_id;
-      await downloadFromTelegram(fileId, filePath);
-      return res.send('Cached from TG');
-    }
-  } catch (e) {}
-
-  try {
-    const stream = await scdl.download(trackUrl);
-    const writeStream = fs.createWriteStream(filePath);
-    stream.pipe(writeStream);
-
-    writeStream.on('finish', async () => {
-      try {
-        const trackInfo = await scdl.getInfo(trackUrl).catch(() => ({}));
-        const fileId = await uploadToTelegram(filePath, trackInfo.title, trackInfo.user?.username);
-        await query(
-          'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
-          [trackUrl, fileId]
-        );
-      } catch (tgErr) {}
-      res.send('Cached from SC');
-    });
-  } catch (err) {
-    res.status(500).send('Error caching');
+    await ensureTrackOnDisk(trackUrl, trackTitle, trackArtist);
+    console.log(`[Precache] Готово: ${trackUrl}`);
+  } catch (e) {
+    console.log(`[Precache] Ошибка: ${e.message}`);
   }
 });
 
-// 13. СТРИМИНГ (Мгновенный старт + фоновое кэширование)
+// 13. СТРИМИНГ
 router.get('/stream', async (req, res) => {
   const trackUrl = req.query.url;
   const trackTitle = req.query.title || 'Unknown'; 
   const trackArtist = req.query.artist || 'Unknown'; 
-  
   if (!trackUrl) return res.status(400).send('URL required');
 
   const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
   const filePath = path.join(TRACKS_DIR, safeFileName);
 
-  if (fs.existsSync(filePath)) {
+  // 1. Файл уже на диске — мгновенный ответ (с Range)
+  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
     return res.sendFile(filePath);
   }
 
+  // 2. Файл качается прямо сейчас — ждем
+  if (downloadLocks.has(trackUrl)) {
+    try {
+      await downloadLocks.get(trackUrl);
+      if (fs.existsSync(filePath)) return res.sendFile(filePath);
+    } catch (e) {}
+  }
+
+  // 3. Скачиваем сейчас
   try {
-    const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
-    if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
-      const fileId = dbResult.rows[0].tg_file_id;
-      try {
-        await downloadFromTelegram(fileId, filePath);
-        return res.sendFile(filePath);
-      } catch (e) {
-        await query('DELETE FROM track_cache WHERE track_url = $1', [trackUrl]);
-      }
-    }
-  } catch (e) {}
-
-  try {
-    console.log(`[Stream] Мгновенный старт: ${trackUrl}`);
-    const stream = await scdl.download(trackUrl);
-    const writeStream = fs.createWriteStream(filePath);
-
-    res.setHeader('Content-Type', 'audio/mpeg');
-    stream.pipe(res);
-    stream.pipe(writeStream);
-
-    writeStream.on('finish', async () => {
-      try {
-        // Используем данные из URL, чтобы не делать лишний getInfo
-        const fileId = await uploadToTelegram(filePath, trackTitle, trackArtist);
-        await query(
-          'INSERT INTO track_cache (track_url, tg_file_id) VALUES ($1, $2) ON CONFLICT (track_url) DO UPDATE SET tg_file_id = EXCLUDED.tg_file_id',
-          [trackUrl, fileId]
-        );
-        console.log(`[Stream] Фоновое сохранение в TG завершено`);
-      } catch (tgErr) {}
-    });
-
+    await ensureTrackOnDisk(trackUrl, trackTitle, trackArtist);
+    return res.sendFile(filePath);
   } catch (err) {
     if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
   }

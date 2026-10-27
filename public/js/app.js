@@ -45,12 +45,27 @@ let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let hiddenPreloader = null;
-const precachedUrls = new Set(); // Отслеживаем уже отправленные на precache
+const precachedUrls = new Set();
 
 // Web Audio API
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
+
+// УДАЛЯЕМ СТАРЫЙ SERVICE WORKER (он ломал перемотку на длинных треках)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(function(registrations) {
+    for(let registration of registrations) {
+      registration.unregister();
+      console.log('Service Worker unregistered');
+    }
+  });
+  if (window.caches) {
+    caches.keys().then(function(names) {
+      for (let name of names) caches.delete(name);
+    });
+  }
+}
 
 // 2. УТИЛИТЫ
 const formatTime = (seconds) => {
@@ -81,30 +96,6 @@ function initAudioContext() {
   }
 }
 
-// --- ФОНОВАЯ ПРЕДЗАГРУЗКА ---
-// Предзагружает указанные треки по одному, с задержкой, чтобы не перегружать сервер
-function precacheTracks(tracksToCache) {
-  const toCache = tracksToCache.filter(t => t && t.permalink_url && !precachedUrls.has(t.permalink_url));
-  
-  toCache.forEach((track, i) => {
-    precachedUrls.add(track.permalink_url);
-    
-    // Задержка 800мс между запросами, чтобы SoundCloud не забанил
-    setTimeout(() => {
-      fetch(`/api/search/precache?url=${encodeURIComponent(track.permalink_url)}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`)
-        .catch(() => {});
-    }, i * 800);
-  });
-}
-
-// Предзагрузка первых N треков при появлении списка
-function precacheFirstTracks(tracks, count = 3) {
-  if (!tracks || tracks.length === 0) return;
-  const slice = tracks.slice(0, Math.min(count, tracks.length));
-  precacheTracks(slice);
-}
-// -----------------------------
-
 async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
@@ -117,6 +108,25 @@ async function fetchWithTimeout(url, options = {}, timeout = 10000) {
     throw err;
   }
 }
+
+// --- ФОНОВАЯ ПРЕДЗАГРУЗКА ---
+function precacheTracks(tracksToCache) {
+  const toCache = tracksToCache.filter(t => t && t.permalink_url && !precachedUrls.has(t.permalink_url));
+  toCache.forEach((track, i) => {
+    precachedUrls.add(track.permalink_url);
+    setTimeout(() => {
+      fetch(`/api/search/precache?url=${encodeURIComponent(track.permalink_url)}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`)
+        .catch(() => {});
+    }, i * 800);
+  });
+}
+
+function precacheFirstTracks(tracks, count = 3) {
+  if (!tracks || tracks.length === 0) return;
+  const slice = tracks.slice(0, Math.min(count, tracks.length));
+  precacheTracks(slice);
+}
+// -----------------------------
 
 async function loadUserLikes() {
   try {
@@ -333,7 +343,6 @@ function renderTracks(tracksArray, isLibrary = false) {
     trackListEl.appendChild(div);
   });
 
-  // 👇 ПРЕДЗАГРУЖАЕМ ПЕРВЫЕ 3 ТРЕКА
   precacheFirstTracks(currentTracks, 3);
 }
 
@@ -480,7 +489,6 @@ function renderSearchResults(tracks, albums) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ничего не найдено.</p>';
   }
 
-  // 👇 ПРЕДЗАГРУЖАЕМ ПЕРВЫЕ 3 ТРЕКА ИЗ ПОИСКА
   if (currentTracks.length > 0) {
     precacheFirstTracks(currentTracks, 3);
   }
@@ -616,7 +624,7 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // ПРЕДЗАГРУЗКА СЛЕДУЮЩИХ 2 ТРЕКОВ
+  // ПРЕДЗАГРУЗКА СЛЕДУЮЩИХ ТРЕКОВ
   if (currentTracks.length > 1) {
     const nextTracks = [];
     for (let i = 1; i <= 2; i++) {
@@ -858,7 +866,7 @@ navLibrary.addEventListener('click', async () => {
   }
 });
 
-// Функция для отрисовки медиатеки (Альбомы + Треки)
+// Функция для отрисовки медиатеки
 function renderLibraryPage(tracks, albums) {
   currentTracks = tracks || [];
   currentTrackIndex = -1;
@@ -971,7 +979,6 @@ function renderLibraryPage(tracks, albums) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ваша медиатека пуста.</p>';
   }
 
-  // 👇 ПРЕДЗАГРУЖАЕМ ПЕРВЫЕ 3 ТРЕКА
   if (tracks && tracks.length > 0) {
     precacheFirstTracks(tracks, 3);
   }
@@ -1298,15 +1305,6 @@ initAudioContext();
 restorePlayerState();
 checkAuth();
 navHome.click();
-
-// Регистрация Service Worker для кэширования аудио
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(() => {
-    console.log('Service Worker для аудио зарегистрирован');
-  }).catch(err => {
-    console.warn('Service Worker не установился:', err);
-  });
-}
 
 // --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
