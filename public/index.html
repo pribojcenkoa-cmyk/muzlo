@@ -2,14 +2,14 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Muzlo - Музыкальный стриминг</title>
   <link rel="icon" type="image/png" href="/img/default-cover.png">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
 
-  <!-- Боковая панель (Левое меню) -->
+  <!-- Боковая панель (Левое меню / Шапка на телефоне) -->
   <aside class="sidebar">
     <div class="logo-wrapper">
       <div class="logo">Muzlo.</div>
@@ -101,6 +101,7 @@
     <div class="modal-content">
       <span class="close-btn" id="btn-close-auth">&times;</span>
       
+      <!-- Блок входа/регистрации -->
       <div id="auth-login-block">
         <h2 id="modal-title">Вход</h2>
         <form id="auth-form">
@@ -114,11 +115,13 @@
           <a href="#" id="btn-toggle-auth">Зарегистрироваться</a>
         </p>
 
+        <!-- Ссылка "Забыли пароль?" -->
         <p style="text-align: center; margin-top: 10px;">
           <a href="#" id="btn-forgot-password" style="color: #b3b3b3; font-size: 14px; text-decoration: underline;">Забыли пароль?</a>
         </p>
       </div>
 
+      <!-- Блок сброса пароля (скрыт по умолчанию) -->
       <div id="reset-password-block" style="display: none;">
         <h2 style="text-align: center; margin-bottom: 20px;">Сброс пароля</h2>
         
@@ -126,6 +129,7 @@
         
         <button type="button" id="btn-send-code" class="btn-submit" style="width: 100%;">Получить код</button>
         
+        <!-- Шаг 2: Ввод кода и нового пароля (скрыт) -->
         <div id="reset-step-2" style="display: none; margin-top: 15px;">
           <input type="text" id="reset-code" placeholder="Код из письма" required class="auth-input">
           <input type="password" id="reset-new-password" placeholder="Новый пароль" required class="auth-input">
