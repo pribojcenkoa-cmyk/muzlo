@@ -331,24 +331,21 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
 .hidden { display: none !important; }
 
 /* =========================================
-   МОБИЛЬНАЯ ВЕРСИЯ (FLEXBOX + SAFE AREA)
+   МОБИЛЬНАЯ ВЕРСИЯ (СИММЕТРИЧНЫЙ ПЛЕЕР)
    ========================================= */
 @media (max-width: 768px) {
   
-  /* 1. ГЛАВНЫЙ КОНТЕЙНЕР НА ВЕСЬ ЭКРАН */
+  /* ГЛАВНЫЙ КОНТЕЙНЕР */
   body {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    height: 100dvh; /* Динамическая высота для мобилок */
+    height: 100dvh;
   }
 
-  /* 2. ШАПКА СВЕРХУ (С УЧЕТОМ "ЧЕЛКИ") */
+  /* ШАПКА СВЕРХУ */
   .sidebar {
     position: relative !important;
-    top: auto !important;
-    left: auto !important;
-    bottom: auto !important;
     width: 100% !important;
     height: auto !important;
     display: flex !important;
@@ -357,7 +354,7 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
     overflow-x: auto !important;
     white-space: nowrap !important;
     padding: 10px 10px !important;
-    padding-top: max(10px, env(safe-area-inset-top)) !important; /* Отступ под статус-бар */
+    padding-top: max(10px, env(safe-area-inset-top)) !important;
     gap: 15px !important;
     background: #000 !important;
     border-bottom: 1px solid #333 !important;
@@ -383,10 +380,10 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
 
   #import-btn { padding: 6px 12px !important; font-size: 13px !important; margin: 0 !important; width: auto !important; white-space: nowrap; }
 
-  /* 3. ЦЕНТРАЛЬНЫЙ БЛОК (СПИСОК ТРЕКОВ) */
+  /* ЦЕНТРАЛЬНЫЙ БЛОК (СПИСОК ТРЕКОВ) */
   .content {
     margin: 0 !important;
-    flex: 1 !important; /* Занимает всё свободное место */
+    flex: 1 !important;
     overflow-y: auto !important;
     padding: 10px !important;
   }
@@ -402,81 +399,90 @@ nav ul li:hover, nav ul li.active { color: #ffffff; }
   .track-artist { font-size: 12px; }
   .track-duration { font-size: 12px; margin-right: 10px; }
 
-  /* 4. ПЛЕЕР СНИЗУ (С УЧЕТОМ ПОЛОСКИ ЖЕСТОВ) */
+  /* 4. ПЛЕЕР СНИЗУ (СИММЕТРИЧНЫЙ) */
   .player {
     position: relative !important;
     bottom: auto !important;
     left: auto !important;
     width: 100% !important;
-    height: auto !important;
+    height: auto !important; /* Высота по контенту */
     flex-shrink: 0 !important;
     display: flex !important;
-    flex-wrap: wrap !important; /* Разрешаем перенос строк */
-    padding: 10px 15px !important;
-    padding-bottom: max(10px, env(safe-area-inset-bottom)) !important; /* Отступ под жесты */
+    flex-direction: column !important; /* Всё друг под другом */
+    align-items: center !important; /* Всё по центру */
+    justify-content: center !important;
+    padding: 15px 15px !important;
+    padding-bottom: max(15px, env(safe-area-inset-bottom)) !important;
     background: #181818 !important;
     border-top: 1px solid #333 !important;
-    gap: 5px !important;
+    gap: 15px !important;
     z-index: 999 !important;
   }
 
-  /* Строка 1: Инфо о треке */
+  /* Инфо о треке (по центру) */
   .player-track-info {
-    width: 60% !important;
+    width: 100% !important;
     display: flex !important;
+    flex-direction: column !important; /* Обложка сверху, текст снизу */
     align-items: center !important;
-    gap: 10px !important;
-    margin: 0 !important;
-    overflow: hidden !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    text-align: center !important;
   }
-  .player-cover { width: 40px !important; height: 40px !important; border-radius: 5px; flex-shrink: 0; }
-  .player-title { font-size: 13px !important; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .player-artist { font-size: 11px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  
+  .player-cover { width: 60px !important; height: 60px !important; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+  
+  .player-text { display: flex; flex-direction: column; align-items: center; }
+  .player-title { font-size: 16px !important; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90vw; }
+  .player-artist { font-size: 13px !important; color: #b3b3b3; }
 
-  /* Строка 1: Кнопки */
+  /* Кнопки управления (по центру) */
   .player-controls {
-    width: 40% !important;
+    width: 100% !important;
     display: flex !important;
-    flex-direction: row !important;
-    justify-content: flex-end !important;
+    flex-direction: column !important; 
     align-items: center !important;
-    margin: 0 !important;
+    justify-content: center !important;
+    gap: 10px !important;
   }
   
   .player-buttons {
     display: flex !important;
-    justify-content: flex-end !important;
+    justify-content: center !important;
     align-items: center !important;
-    gap: 10px !important;
+    gap: 30px !important;
   }
 
   .btn-play, #btn-play {
-    width: 38px !important; height: 38px !important;
+    width: 50px !important; height: 50px !important;
     border-radius: 50% !important; background: #fff !important;
-    color: #000 !important; font-size: 16px !important;
+    color: #000 !important; font-size: 22px !important;
     display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
+    box-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
   }
-  .control-btn { font-size: 18px !important; flex-shrink: 0; }
+  
+  .control-btn { font-size: 24px !important; color: #fff !important; opacity: 0.8; }
+  .control-btn:active { opacity: 1; transform: scale(0.95); }
   
   /* Прячем время */
   .player-progress { display: none !important; }
 
-  /* Строка 2: Громкость (на всю ширину) */
+  /* Громкость (по центру, компактная) */
   .player-volume {
-    width: 100% !important; /* Переносит на новую строку */
+    width: 100% !important;
+    max-width: 300px !important; /* Ограничиваем ширину, чтобы не растягивалось на весь экран */
     display: flex !important;
     align-items: center !important;
-    justify-content: space-between !important;
+    justify-content: center !important;
     padding: 0 !important;
     gap: 10px !important;
-    margin: 5px 0 0 0 !important;
+    margin: 0 !important;
   }
   
-  .player-volume span { display: block !important; font-size: 11px !important; color: #b3b3b3; }
+  .player-volume span { display: block !important; font-size: 12px !important; color: #b3b3b3; }
   
   .player-volume input[type="range"] { 
-    flex: 1 !important; /* Растягивает ползунок */
+    flex: 1 !important; 
     height: 4px !important; 
     accent-color: #1db954;
   }
