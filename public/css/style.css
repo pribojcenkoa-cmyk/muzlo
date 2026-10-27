@@ -372,3 +372,112 @@ input[type="range"]:hover::-webkit-slider-thumb { opacity: 1; }
 
   .modal-content { width: 90%; padding: 20px; }
 }
+/* =========================================
+   АДАПТАЦИЯ ПОД МОБИЛЬНЫЕ ТЕЛЕФОНЫ
+   ========================================= */
+@media (max-width: 768px) {
+  
+  /* Основной контент */
+  .content {
+    margin-left: 0 !important; /* Убираем отступ слева */
+    padding: 10px !important;
+    padding-bottom: 160px !important; /* Оставляем место для плеера */
+  }
+
+  /* Сайдбар (меню) */
+  .sidebar {
+    position: relative !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 10px !important;
+  }
+  
+  .nav ul {
+    display: flex;
+    flex-wrap: wrap; /* Кнопки будут переноситься на новую строку */
+    gap: 5px;
+  }
+
+  /* --- ПЛЕЕР --- */
+  .player {
+    flex-direction: column !important; /* Выстраиваем элементы плеера друг под другом */
+    height: auto !important;
+    padding: 10px !important;
+    gap: 10px !important;
+    background: #181818;
+    border-top: 1px solid #333;
+  }
+
+  /* Инфо о треке */
+  .player-track-info {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+  
+  .player-track-info img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  /* Блок с кнопками (плей, некст) */
+  .player-controls {
+    width: 100% !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .player-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+  }
+
+  /* Кнопка Play (белый круг в твоем случае) */
+  .btn-play, #btn-play {
+    width: 50px !important;
+    height: 50px !important;
+    border-radius: 50% !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 20px !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ПОЛЗУНОК ПЕРЕМОТКИ (САМОЕ ВАЖНОЕ) */
+  .player-progress {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  .player-progress input[type="range"] {
+    flex: 1 !important;
+    width: 100% !important;
+    display: block !important; /* Принудительно показываем ползунок */
+    height: 6px !important;
+    background: #4d4d4d;
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+  }
+
+  /* ПОЛЗУНОК ГРОМКОСТИ */
+  .player-volume {
+    width: 100% !important;
+    justify-content: center !important;
+    gap: 15px !important;
+    padding-bottom: 10px;
+  }
+
+  .player-volume input[type="range"] {
+    width: 60% !important; /* Делаем его широким, чтобы легко попасть пальцем */
+    height: 6px !important;
+    background: #4d4d4d;
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+  }
+}
