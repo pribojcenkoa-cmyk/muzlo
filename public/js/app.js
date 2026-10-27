@@ -43,7 +43,7 @@ let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let hiddenPreloader = null;
-let isPoppingState = false; // Флаг для кнопки "Назад" в браузере
+let isPoppingState = false;
 
 // Web Audio API
 let audioContext = null;
@@ -82,7 +82,6 @@ const formatTime = (seconds) => {
 
 const getValidCover = (url) => url || '/img/default-cover.png';
 
-// Функция Фишера-Йетса для честного перемешивания
 function shuffleArray(array) {
   const newArr = [...array];
   for (let i = newArr.length - 1; i > 0; i--) {
@@ -238,6 +237,9 @@ async function restorePlayerState() {
     audioPlayer.src = getStreamUrl(track);
     isPlaying = false;
     btnPlay.textContent = '▶';
+    
+    // Восстанавливаем обложку в системном виджете
+    updateMediaSession(track);
 
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
@@ -569,10 +571,15 @@ function playTrack(track) {
   audioPlayer.src = getStreamUrl(track);
   audioPlayer.load();
 
+  // --- ОБНОВЛЕНИЕ СИСТЕМНОГО ВИДЖЕТА ---
+  updateMediaSession(track);
+  // -------------------------------------
+
   audioPlayer.addEventListener('playing', () => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
     savePlayerState();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   }, { once: true });
 
   audioPlayer.play().then(() => {
@@ -620,17 +627,66 @@ function playTrack(track) {
   }
 }
 
+// --- ФУНКЦИЯ ДЛЯ ОБНОВЛЕНИЯ СИСТЕМНОГО ВИДЖЕТА ---
+function updateMediaSession(track) {
+  if ('mediaSession' in navigator) {
+    // 1. Передаем обложку, название и артиста в систему
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title,
+      artist: track.artist_name || 'Неизвестен',
+      album: 'Muzlo',
+      artwork: [
+        { src: getValidCover(track.cover_url), sizes: '96x96', type: 'image/jpeg' },
+        { src: getValidCover(track.cover_url), sizes: '128x128', type: 'image/jpeg' },
+        { src: getValidCover(track.cover_url), sizes: '192x192', type: 'image/jpeg' },
+        { src: getValidCover(track.cover_url), sizes: '256x256', type: 'image/jpeg' },
+        { src: getValidCover(track.cover_url), sizes: '384x384', type: 'image/jpeg' },
+        { src: getValidCover(track.cover_url), sizes: '512x512', type: 'image/jpeg' },
+      ]
+    });
+
+    // 2. Включаем кнопки Назад, Плей/Пауза и Вперед в виджете
+    try {
+      navigator.mediaSession.setActionHandler('play', () => {
+        audioPlayer.play();
+        isPlaying = true;
+        btnPlay.textContent = '⏸';
+        navigator.mediaSession.playbackState = 'playing';
+      });
+      
+      navigator.mediaSession.setActionHandler('pause', () => {
+        audioPlayer.pause();
+        isPlaying = false;
+        btnPlay.textContent = '▶';
+        navigator.mediaSession.playbackState = 'paused';
+      });
+      
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        btnPrev.click();
+      });
+      
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        btnNext.click();
+      });
+    } catch (error) {
+      console.log('Не удалось настроить кнопки виджета:', error);
+    }
+  }
+}
+
 btnPlay.addEventListener('click', () => {
   if (!audioPlayer.src) return;
   if (isPlaying) {
     audioPlayer.pause();
     btnPlay.textContent = '▶';
     isPlaying = false;
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     savePlayerState();
   } else {
     audioPlayer.play();
     btnPlay.textContent = '⏸';
     isPlaying = true;
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   }
 });
 
@@ -705,7 +761,6 @@ function switchTab(activeTab, title, showSearch = false) {
   profileStats.style.display = 'none';
 }
 
-// Обработчик кнопки "Назад" в браузере
 window.addEventListener('popstate', (event) => {
   isPoppingState = true;
   if (event.state && event.state.tab) {
@@ -904,7 +959,6 @@ function renderLibraryPage(tracks, albums) {
     trackHeader.style.fontSize = '18px';
     trackListEl.appendChild(trackHeader);
 
-    // Кнопки управления
     const controlsDiv = document.createElement('div');
     controlsDiv.style.display = 'flex';
     controlsDiv.style.gap = '10px';
@@ -916,11 +970,9 @@ function renderLibraryPage(tracks, albums) {
     `;
     trackListEl.appendChild(controlsDiv);
 
-    // Слушатели кнопок
     document.getElementById('lib-shuffle').addEventListener('click', () => {
       const shuffled = shuffleArray(tracks);
       renderLibraryPage(shuffled, albums);
-      // Симулируем клик по первому треку, чтобы он заиграл
       const firstEl = trackListEl.querySelector('.track-item');
       if (firstEl) firstEl.click();
     });
