@@ -44,7 +44,8 @@ let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
-let hiddenPreloader = null; // Скрытый плеер для предзагрузки браузером
+let hiddenPreloader = null;
+const precachedUrls = new Set(); // Отслеживаем уже отправленные на precache
 
 // Web Audio API
 let audioContext = null;
@@ -79,6 +80,30 @@ function initAudioContext() {
     console.error('Web Audio API не поддерживается:', e);
   }
 }
+
+// --- ФОНОВАЯ ПРЕДЗАГРУЗКА ---
+// Предзагружает указанные треки по одному, с задержкой, чтобы не перегружать сервер
+function precacheTracks(tracksToCache) {
+  const toCache = tracksToCache.filter(t => t && t.permalink_url && !precachedUrls.has(t.permalink_url));
+  
+  toCache.forEach((track, i) => {
+    precachedUrls.add(track.permalink_url);
+    
+    // Задержка 800мс между запросами, чтобы SoundCloud не забанил
+    setTimeout(() => {
+      fetch(`/api/search/precache?url=${encodeURIComponent(track.permalink_url)}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`)
+        .catch(() => {});
+    }, i * 800);
+  });
+}
+
+// Предзагрузка первых N треков при появлении списка
+function precacheFirstTracks(tracks, count = 3) {
+  if (!tracks || tracks.length === 0) return;
+  const slice = tracks.slice(0, Math.min(count, tracks.length));
+  precacheTracks(slice);
+}
+// -----------------------------
 
 async function fetchWithTimeout(url, options = {}, timeout = 10000) {
   const controller = new AbortController();
@@ -307,6 +332,9 @@ function renderTracks(tracksArray, isLibrary = false) {
     }
     trackListEl.appendChild(div);
   });
+
+  // 👇 ПРЕДЗАГРУЖАЕМ ПЕРВЫЕ 3 ТРЕКА
+  precacheFirstTracks(currentTracks, 3);
 }
 
 // Функция для отрисовки поиска (Альбомы + Треки)
@@ -451,6 +479,11 @@ function renderSearchResults(tracks, albums) {
   if ((!albums || albums.length === 0) && currentTracks.length === 0) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ничего не найдено.</p>';
   }
+
+  // 👇 ПРЕДЗАГРУЖАЕМ ПЕРВЫЕ 3 ТРЕКА ИЗ ПОИСКА
+  if (currentTracks.length > 0) {
+    precacheFirstTracks(currentTracks, 3);
+  }
 }
 
 // Функция загрузки треков из альбома
@@ -583,25 +616,27 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // Предзагрузка следующего трека
+  // ПРЕДЗАГРУЗКА СЛЕДУЮЩИХ 2 ТРЕКОВ
   if (currentTracks.length > 1) {
-    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-    const nextTrack = currentTracks[nextIndex];
+    const nextTracks = [];
+    for (let i = 1; i <= 2; i++) {
+      const idx = (currentTrackIndex + i) % currentTracks.length;
+      if (idx >= 0 && idx < currentTracks.length) {
+        nextTracks.push(currentTracks[idx]);
+      }
+    }
     
-    if (nextTrack && nextTrack.stream_url) {
-      const nextUrlWithMeta = `${nextTrack.stream_url}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`;
-
+    if (nextTracks[0] && nextTracks[0].stream_url) {
       if (!hiddenPreloader) {
         hiddenPreloader = new Audio();
         hiddenPreloader.preload = 'auto';
       }
+      const nextUrlWithMeta = `${nextTracks[0].stream_url}&title=${encodeURIComponent(nextTracks[0].title)}&artist=${encodeURIComponent(nextTracks[0].artist_name)}`;
       hiddenPreloader.src = nextUrlWithMeta;
       hiddenPreloader.load();
-
-      if (nextTrack.permalink_url) {
-        fetch(`/api/search/precache?url=${encodeURIComponent(nextTrack.permalink_url)}&title=${encodeURIComponent(nextTrack.title)}&artist=${encodeURIComponent(nextTrack.artist_name)}`).catch(() => {});
-      }
     }
+
+    precacheTracks(nextTracks);
   }
 }
 
@@ -825,7 +860,6 @@ navLibrary.addEventListener('click', async () => {
 
 // Функция для отрисовки медиатеки (Альбомы + Треки)
 function renderLibraryPage(tracks, albums) {
-  // ФИКС: Обновляем текущий список треков и сбрасываем индекс
   currentTracks = tracks || [];
   currentTrackIndex = -1;
 
@@ -910,7 +944,6 @@ function renderLibraryPage(tracks, albums) {
 
       div.addEventListener('click', (e) => {
         if (e.target.classList.contains('btn-delete')) return;
-        // ФИКС: Подсвечиваем активный трек и обновляем индекс
         document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
         div.classList.add('active');
         currentTrackIndex = index;
@@ -936,6 +969,11 @@ function renderLibraryPage(tracks, albums) {
 
   if ((!albums || albums.length === 0) && (!tracks || tracks.length === 0)) {
     trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Ваша медиатека пуста.</p>';
+  }
+
+  // 👇 ПРЕДЗАГРУЖАЕМ ПЕРВЫЕ 3 ТРЕКА
+  if (tracks && tracks.length > 0) {
+    precacheFirstTracks(tracks, 3);
   }
 }
 
