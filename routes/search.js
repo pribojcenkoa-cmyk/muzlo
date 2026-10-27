@@ -17,7 +17,6 @@ if (!fs.existsSync(TRACKS_DIR)) {
   fs.mkdirSync(TRACKS_DIR, { recursive: true });
 }
 
-// Блокировки для скачивания и загрузки
 const downloadLocks = new Map();
 const uploadLocks = new Map();
 
@@ -63,23 +62,17 @@ async function downloadFromTelegram(fileId, destPath) {
   fs.writeFileSync(destPath, Buffer.from(buffer));
 }
 
-// Функция загрузки в TG с блокировкой (защита от дублей)
 async function uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist) {
-  // Если уже загружается — ждем
   if (uploadLocks.has(trackUrl)) {
     try { await uploadLocks.get(trackUrl); } catch (e) {}
     return;
   }
 
-  // Если уже есть в БД — не загружаем повторно
   try {
     const dbCheck = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
-    if (dbCheck.rows.length > 0 && dbCheck.rows[0].tg_file_id) {
-      return; // Уже загружено
-    }
+    if (dbCheck.rows.length > 0 && dbCheck.rows[0].tg_file_id) return;
   } catch (e) {}
 
-  // Начинаем загрузку с блокировкой
   const uploadPromise = (async () => {
     try {
       const fileId = await uploadToTelegram(filePath, trackTitle, trackArtist);
@@ -97,7 +90,6 @@ async function uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist)
   try { await uploadPromise; } finally { uploadLocks.delete(trackUrl); }
 }
 
-// Универсальная функция: скачать трек на диск (с блокировкой)
 async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
   const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
   const filePath = path.join(TRACKS_DIR, safeFileName);
@@ -110,7 +102,6 @@ async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
   }
 
   const downloadPromise = (async () => {
-    // 1. Из Telegram (если есть)
     try {
       const dbResult = await query('SELECT tg_file_id FROM track_cache WHERE track_url = $1', [trackUrl]);
       if (dbResult.rows.length > 0 && dbResult.rows[0].tg_file_id) {
@@ -119,7 +110,6 @@ async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
       }
     } catch (e) {}
 
-    // 2. С SoundCloud
     const stream = await scdl.download(trackUrl);
     const writeStream = fs.createWriteStream(filePath);
     await new Promise((resolve, reject) => {
@@ -128,7 +118,6 @@ async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
       writeStream.on('error', reject);
     });
 
-    // 3. Загружаем в TG через Safe-функцию (не будет дублей)
     uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
   })();
 
@@ -136,7 +125,6 @@ async function ensureTrackOnDisk(trackUrl, trackTitle, trackArtist) {
   try { await downloadPromise; } finally { downloadLocks.delete(trackUrl); }
   return filePath;
 }
-
 // ============================================
 
 function formatTrack(track) {
@@ -496,22 +484,63 @@ router.get('/precache', async (req, res) => {
   }
 });
 
-// 13. СТРИМИНГ
+// 13. СТРИМИНГ (быстрый + обычный режим)
 router.get('/stream', async (req, res) => {
   const trackUrl = req.query.url;
-  const trackTitle = req.query.title || 'Unknown'; 
-  const trackArtist = req.query.artist || 'Unknown'; 
+  const trackTitle = req.query.title || 'Unknown';
+  const trackArtist = req.query.artist || 'Unknown';
+  const quick = req.query.quick === '1';
+  
   if (!trackUrl) return res.status(400).send('URL required');
 
   const safeFileName = trackUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 150) + '.mp3';
   const filePath = path.join(TRACKS_DIR, safeFileName);
 
-  // 1. Файл уже на диске — мгновенный ответ (с Range)
+  // 1. Файл есть на диске → мгновенный ответ (ползунок работает)
   if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
     return res.sendFile(filePath);
   }
 
-  // 2. Файл качается прямо сейчас — ждем
+  // ============ БЫСТРЫЙ РЕЖИМ (скип) ============
+  if (quick) {
+    if (downloadLocks.has(trackUrl)) {
+      try {
+        await downloadLocks.get(trackUrl);
+        if (fs.existsSync(filePath) && fs.statSync(filePath).size > 1000) {
+          return res.sendFile(filePath);
+        }
+      } catch (e) {}
+    }
+
+    try {
+      console.log(`[Stream] QUICK: ${trackUrl}`);
+      const stream = await scdl.download(trackUrl);
+      const writeStream = fs.createWriteStream(filePath);
+      
+      res.setHeader('Content-Type', 'audio/mpeg');
+      stream.pipe(res);
+      stream.pipe(writeStream);
+
+      const streamPromise = new Promise((resolve) => {
+        writeStream.on('finish', () => {
+          uploadToTelegramSafe(trackUrl, filePath, trackTitle, trackArtist);
+          resolve();
+        });
+        writeStream.on('error', () => resolve());
+        stream.on('error', () => resolve());
+      });
+      
+      downloadLocks.set(trackUrl, streamPromise);
+      streamPromise.finally(() => downloadLocks.delete(trackUrl));
+      return;
+    } catch (err) {
+      console.error(`[Stream] QUICK error: ${err.message}`);
+      if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
+      return;
+    }
+  }
+
+  // ============ ОБЫЧНЫЙ РЕЖИМ ============
   if (downloadLocks.has(trackUrl)) {
     try {
       await downloadLocks.get(trackUrl);
@@ -519,11 +548,12 @@ router.get('/stream', async (req, res) => {
     } catch (e) {}
   }
 
-  // 3. Скачиваем сейчас
   try {
+    console.log(`[Stream] NORMAL: ${trackUrl}`);
     await ensureTrackOnDisk(trackUrl, trackTitle, trackArtist);
     return res.sendFile(filePath);
   } catch (err) {
+    console.error(`[Stream] NORMAL error: ${err.message}`);
     if (!res.headersSent) res.status(500).send('Ошибка воспроизведения');
   }
 });

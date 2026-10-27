@@ -52,13 +52,10 @@ let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 
-// УДАЛЯЕМ СТАРЫЙ SERVICE WORKER (он ломал перемотку на длинных треках)
+// Удаляем старый Service Worker (он ломал перемотку)
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(function(registrations) {
-    for(let registration of registrations) {
-      registration.unregister();
-      console.log('Service Worker unregistered');
-    }
+    for(let registration of registrations) registration.unregister();
   });
   if (window.caches) {
     caches.keys().then(function(names) {
@@ -292,7 +289,7 @@ function renderTracks(tracksArray, isLibrary = false) {
       document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
       div.classList.add('active');
       currentTrackIndex = index;
-      playTrack(track);
+      playTrack(track, false); // обычный режим
     });
 
     const actionBtn = div.querySelector('.btn-like, .btn-delete');
@@ -331,13 +328,8 @@ function renderTracks(tracksArray, isLibrary = false) {
             actionBtn.classList.add('liked');
             actionBtn.textContent = '❤';
             userLikedTrackIds.add(String(track.id));
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            alert(`Ошибка сохранения: ${errData.error || 'Сервер не отвечает'}`);
           }
-        } catch (err) {
-          alert('Ошибка сети при сохранении трека');
-        }
+        } catch (err) {}
       });
     }
     trackListEl.appendChild(div);
@@ -346,12 +338,11 @@ function renderTracks(tracksArray, isLibrary = false) {
   precacheFirstTracks(currentTracks, 3);
 }
 
-// Функция для отрисовки поиска (Альбомы + Треки)
+// Функция для отрисовки поиска
 function renderSearchResults(tracks, albums) {
   currentTracks = tracks || [];
   trackListEl.innerHTML = '';
 
-  // 1. Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Альбомы и плейлисты';
@@ -415,7 +406,6 @@ function renderSearchResults(tracks, albums) {
     });
   }
 
-  // 2. Треки
   if (currentTracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Треки';
@@ -452,7 +442,7 @@ function renderSearchResults(tracks, albums) {
         document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
         div.classList.add('active');
         currentTrackIndex = index;
-        playTrack(track);
+        playTrack(track, false);
       });
 
       const actionBtn = div.querySelector('.btn-like');
@@ -494,7 +484,6 @@ function renderSearchResults(tracks, albums) {
   }
 }
 
-// Функция загрузки треков из альбома
 async function loadAlbum(albumUrl) {
   if (!albumUrl || albumUrl === 'undefined') {
     trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Ошибка: неверная ссылка.</p>';
@@ -554,8 +543,8 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
-function playTrack(track) {
+// 6. ВОСПРОИЗВЕДЕНИЕ (обычный/быстрый режимы)
+function playTrack(track, quick = false) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
     playerEl.classList.remove('hidden');
@@ -584,7 +573,8 @@ function playTrack(track) {
   isPlaying = false;
 
   const baseStreamUrl = getStreamUrl(track);
-  const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}`;
+  const quickParam = quick ? '&quick=1' : '';
+  const streamUrlWithMeta = `${baseStreamUrl}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist_name)}${quickParam}`;
   
   audioPlayer.src = streamUrlWithMeta;
   audioPlayer.load();
@@ -624,7 +614,7 @@ function playTrack(track) {
       }).catch(e => {});
   }
 
-  // ПРЕДЗАГРУЗКА СЛЕДУЮЩИХ ТРЕКОВ
+  // Предзагрузка следующих треков
   if (currentTracks.length > 1) {
     const nextTracks = [];
     for (let i = 1; i <= 2; i++) {
@@ -680,12 +670,22 @@ btnPlay.addEventListener('click', () => {
 
 btnNext.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
-  document.querySelector(`.track-item[data-index="${(currentTrackIndex + 1) % currentTracks.length}"]`)?.click();
+  const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+  document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+  const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
+  if (nextEl) nextEl.classList.add('active');
+  currentTrackIndex = nextIndex;
+  playTrack(currentTracks[nextIndex], true); // quick mode
 });
 
 btnPrev.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
-  document.querySelector(`.track-item[data-index="${(currentTrackIndex - 1 + currentTracks.length) % currentTracks.length}"]`)?.click();
+  const prevIndex = (currentTrackIndex - 1 + currentTracks.length) % currentTracks.length;
+  document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+  const prevEl = document.querySelector(`.track-item[data-index="${prevIndex}"]`);
+  if (prevEl) prevEl.classList.add('active');
+  currentTrackIndex = prevIndex;
+  playTrack(currentTracks[prevIndex], true); // quick mode
 });
 
 audioPlayer.addEventListener('timeupdate', () => {
@@ -730,10 +730,17 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
+// Трек закончился сам — переключаем следующий в ОБЫЧНОМ режиме (precached → ползунок работает)
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
-  btnNext.click();
+  if (currentTracks.length === 0) return;
+  const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+  document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+  const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
+  if (nextEl) nextEl.classList.add('active');
+  currentTrackIndex = nextIndex;
+  playTrack(currentTracks[nextIndex], false); // normal mode
 });
 
 window.addEventListener('beforeunload', savePlayerState);
@@ -866,14 +873,12 @@ navLibrary.addEventListener('click', async () => {
   }
 });
 
-// Функция для отрисовки медиатеки
 function renderLibraryPage(tracks, albums) {
   currentTracks = tracks || [];
   currentTrackIndex = -1;
 
   trackListEl.innerHTML = '';
   
-  // 1. Альбомы
   if (albums && albums.length > 0) {
     const albumHeader = document.createElement('h3');
     albumHeader.textContent = 'Сохраненные альбомы';
@@ -921,7 +926,6 @@ function renderLibraryPage(tracks, albums) {
     });
   }
 
-  // 2. Треки
   if (tracks && tracks.length > 0) {
     const trackHeader = document.createElement('h3');
     trackHeader.textContent = 'Сохраненные треки';
@@ -955,7 +959,7 @@ function renderLibraryPage(tracks, albums) {
         document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
         div.classList.add('active');
         currentTrackIndex = index;
-        playTrack(track);
+        playTrack(track, false);
       });
 
       const deleteBtn = div.querySelector('.btn-delete');
@@ -984,7 +988,7 @@ function renderLibraryPage(tracks, albums) {
   }
 }
 
-// 8. АВТОРИЗАЦИЯ
+// 8. АВТОРИЗАЦИЯ (выпадающее меню)
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
   if (e.target.id === 'btn-logout') logout();
@@ -1116,7 +1120,7 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// --- ЛОГИКА СБРОСА ПАРОЛЯ ---
+// --- СБРОС ПАРОЛЯ ---
 const btnForgot = document.getElementById('btn-forgot-password');
 const resetBlock = document.getElementById('reset-password-block');
 const btnBackToLogin = document.getElementById('btn-back-to-login');
@@ -1306,20 +1310,11 @@ restorePlayerState();
 checkAuth();
 navHome.click();
 
-// --- ЗАЩИТА ОТ ПРОСМОТРА КОДА (ПКМ) ---
+// --- ЗАЩИТА (ПКМ и F12) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
 
 document.addEventListener('keydown', function(e) {
-  if (e.keyCode === 123) { // F12
-    e.preventDefault();
-    return false;
-  }
-  if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) { // Ctrl+Shift+I / J
-    e.preventDefault();
-    return false;
-  }
-  if (e.ctrlKey && e.keyCode === 85) { // Ctrl+U
-    e.preventDefault();
-    return false;
-  }
+  if (e.keyCode === 123) { e.preventDefault(); return false; }
+  if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) { e.preventDefault(); return false; }
+  if (e.ctrlKey && e.keyCode === 85) { e.preventDefault(); return false; }
 });
