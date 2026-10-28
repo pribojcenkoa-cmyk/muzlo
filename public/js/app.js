@@ -44,7 +44,7 @@ let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let hiddenPreloader = null;
 
-// Web Audio API
+// Web Audio API (Для 300% громкости)
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
@@ -527,7 +527,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
+// 6. ВОСПРОИЗВЕДЕНИЕ (Тот самый работающий код)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -656,6 +656,7 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
+// --- ГРОМКОСТЬ (300%) ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -671,6 +672,7 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
+// --- КОНЕЦ ТРЕКА ---
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
