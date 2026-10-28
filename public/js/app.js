@@ -43,25 +43,21 @@ let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let isPoppingState = false;
-
-// Флаг для бесшовного переключения в фоне
-let hasSwitchedTrack = false; 
+let hiddenPreloader = null; // Скрытый плеер для предзагрузки
 
 // Web Audio API
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 
-// --- MEDIA SESSION (РЕГИСТРАЦИЯ КНОПОК ВИДЖЕТА 1 РАЗ) ---
+// --- MEDIA SESSION (ВИДЖЕТ) ---
 if ('mediaSession' in navigator) {
   try {
     navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
     navigator.mediaSession.setActionHandler('pause', () => { if (isPlaying) btnPlay.click(); });
     navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
     navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
-  } catch (error) {
-    console.log('Ошибка установки кнопок MediaSession:', error);
-  }
+  } catch (error) {}
 }
 
 // Удаляем старый Service Worker и кэш
@@ -572,18 +568,10 @@ function playTrack(track) {
 
   btnPlay.textContent = '⏳';
   isPlaying = false;
-  hasSwitchedTrack = false; // Сбрасываем флаг для нового трека
 
   updateMediaSession(track);
 
   audioPlayer.src = getStreamUrl(track);
-
-  audioPlayer.addEventListener('playing', () => {
-    isPlaying = true;
-    btnPlay.textContent = '⏸';
-    savePlayerState();
-    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-  }, { once: true });
 
   audioPlayer.play().catch(err => {
     console.warn('Фоновая блокировка play():', err.name);
@@ -598,9 +586,25 @@ function playTrack(track) {
       duration: track.duration, genre: track.genre
     })
   }).catch(err => {});
+
+  // --- ПРЕДЗАГРУЗКА СЛЕДУЮЩЕГО ТРЕКА ---
+  // Скачиваем следующий трек в фоне, чтобы когда экран выключится, плеер взял его из памяти
+  if (currentTracks.length > 1) {
+    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+    const nextTrack = currentTracks[nextIndex];
+    if (nextTrack) {
+      if (!hiddenPreloader) {
+        hiddenPreloader = new Audio();
+        hiddenPreloader.preload = 'auto';
+        hiddenPreloader.muted = true; // Беззвучно
+      }
+      hiddenPreloader.src = getStreamUrl(nextTrack);
+      hiddenPreloader.load();
+    }
+  }
 }
 
-// --- ФУНКЦИЯ УСТАНОВКИ ОБЛОЖКИ ВИДЖЕТА ---
+// --- ВИДЖЕТ ---
 function updateMediaSession(track) {
   if (!('mediaSession' in navigator)) return;
   try {
@@ -643,7 +647,6 @@ btnPlay.addEventListener('click', () => {
 
 btnNext.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
-  hasSwitchedTrack = true;
   const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
   document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
   const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
@@ -654,7 +657,6 @@ btnNext.addEventListener('click', () => {
 
 btnPrev.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
-  hasSwitchedTrack = true;
   const prevIndex = (currentTrackIndex - 1 + currentTracks.length) % currentTracks.length;
   document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
   const prevEl = document.querySelector(`.track-item[data-index="${prevIndex}"]`);
@@ -663,27 +665,18 @@ btnPrev.addEventListener('click', () => {
   playTrack(currentTracks[prevIndex]);
 });
 
+audioPlayer.addEventListener('playing', () => {
+  isPlaying = true;
+  btnPlay.textContent = '⏸';
+  savePlayerState();
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+});
+
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
-  
   if (duration && !isNaN(duration)) {
     totalTimeEl.textContent = formatTime(duration);
-    
-    // --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА ---
-    // Если до конца трека осталось меньше 1.5 секунд, и мы еще не переключили, меняем трек.
-    // Это предотвращает паузу, из-за которой Android усыпляет звук.
-    if (duration - audioPlayer.currentTime < 1.5 && !hasSwitchedTrack && currentTracks.length > 1) {
-      hasSwitchedTrack = true;
-      const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-      
-      document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
-      const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
-      if (nextEl) nextEl.classList.add('active');
-      
-      currentTrackIndex = nextIndex;
-      playTrack(currentTracks[nextIndex]);
-    }
   }
   if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
@@ -692,9 +685,11 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
+// --- ГРОМКОСТЬ (ДО 300%) ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
+
   if (value <= 100) {
     if (gainNode) gainNode.gain.value = 1;
     audioPlayer.volume = value / 100;
@@ -706,11 +701,8 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// Страховка (если timeupdate почему-то не сработал)
+// --- КОНЕЦ ТРЕКА ---
 audioPlayer.addEventListener('ended', () => {
-  if (hasSwitchedTrack) return;
-  hasSwitchedTrack = true;
-  
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
   if (currentTracks.length === 0) return;
@@ -724,10 +716,9 @@ audioPlayer.addEventListener('ended', () => {
   playTrack(currentTracks[nextIndex]);
 });
 
-// Страховка от разрыва соединения сервером в фоне
+// Если трек упал с ошибкой в фоне
 audioPlayer.addEventListener('error', () => {
-  if (!hasSwitchedTrack && currentTracks.length > 1) {
-    hasSwitchedTrack = true;
+  if (currentTracks.length > 1 && audioPlayer.src) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     currentTrackIndex = nextIndex;
     playTrack(currentTracks[nextIndex]);
