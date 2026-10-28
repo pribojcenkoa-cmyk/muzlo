@@ -44,21 +44,12 @@ let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let isPoppingState = false;
 
-// Web Audio API
+// Web Audio API (для 300% громкости)
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 
-// --- MEDIA SESSION (ВИДЖЕТ) ---
-if ('mediaSession' in navigator) {
-  try {
-    navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
-    navigator.mediaSession.setActionHandler('pause', () => { if (isPlaying) btnPlay.click(); });
-    navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
-    navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
-  } catch (error) {}
-}
-
+// Удаляем старый Service Worker и кэш
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(function(registrations) {
     for (let registration of registrations) registration.unregister();
@@ -160,7 +151,7 @@ async function loadAdminStats() {
     const totalEl = document.getElementById('admin-total');
     const playsEl = document.getElementById('admin-plays');
     if (onlineEl) onlineEl.textContent = data.online;
-    if (totalEl) totalEl.textContent = data.users;
+    if (totalEl) totalEl.textContent = data.total_users;
     if (playsEl) playsEl.textContent = data.plays_today;
 
     const usersContainer = document.getElementById('admin-users-list');
@@ -204,6 +195,7 @@ async function performSearch(query) {
   }
 }
 
+// 3. СОХРАНЕНИЕ ПЛЕЕРА
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -243,8 +235,6 @@ async function restorePlayerState() {
     isPlaying = false;
     btnPlay.textContent = '▶';
 
-    updateMediaSession(track);
-
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
         audioPlayer.currentTime = savedTime;
@@ -255,6 +245,7 @@ async function restorePlayerState() {
   } catch (e) {}
 }
 
+// 4. РЕНДЕР
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
   trackListEl.innerHTML = '';
@@ -515,6 +506,7 @@ trackListEl.addEventListener('click', (e) => {
   }
 });
 
+// 5. АРТИСТ
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
   [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
@@ -535,7 +527,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
+// 6. ВОСПРОИЗВЕДЕНИЕ (Чистое, без виджетов)
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -564,12 +556,7 @@ function playTrack(track) {
   btnPlay.textContent = '⏳';
   isPlaying = false;
 
-  // Обновляем виджет
-  updateMediaSession(track);
-
   audioPlayer.src = getStreamUrl(track);
-  audioPlayer.load(); // <-- ВОТ ОНА, чтобы телефон видел реальную длительность
-  
   audioPlayer.play().catch(err => {
     console.warn('Фоновая блокировка play():', err.name);
     btnPlay.textContent = '▶';
@@ -585,43 +572,17 @@ function playTrack(track) {
   }).catch(err => {});
 }
 
-function updateMediaSession(track) {
-  if (!('mediaSession' in navigator)) return;
-  try {
-    let cover = track.cover_url || '/img/default-cover.png';
-    if (!cover.startsWith('http')) {
-      cover = window.location.origin + cover;
-    }
-
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.title || 'Muzlo',
-      artist: track.artist_name || 'Неизвестен',
-      album: 'Muzlo',
-      artwork: [
-        { src: cover, sizes: '96x96' },
-        { src: cover, sizes: '128x128' },
-        { src: cover, sizes: '192x192' },
-        { src: cover, sizes: '256x256' },
-        { src: cover, sizes: '384x384' },
-        { src: cover, sizes: '512x512' }
-      ]
-    });
-  } catch (e) {}
-}
-
 btnPlay.addEventListener('click', () => {
   if (!audioPlayer.src) return;
   if (isPlaying) {
     audioPlayer.pause();
     btnPlay.textContent = '▶';
     isPlaying = false;
-    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     savePlayerState();
   } else {
     audioPlayer.play();
     btnPlay.textContent = '⏸';
     isPlaying = true;
-    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   }
 });
 
@@ -648,14 +609,17 @@ btnPrev.addEventListener('click', () => {
 audioPlayer.addEventListener('playing', () => {
   isPlaying = true;
   btnPlay.textContent = '⏸';
-  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
 });
 
-// ОБНОВЛЯЕМ ВРЕМЯ ТОЛЬКО ПРИ ЗАГРУЗКЕ
+audioPlayer.addEventListener('timeupdate', () => {
+  currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+});
+
 audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
+// --- ГРОМКОСТЬ (300%) ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -671,7 +635,7 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// ПЕРЕКЛЮЧЕНИЕ ТОЛЬКО ПО КОНЦУ ТРЕКА
+// --- КОНЕЦ ТРЕКА ---
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
@@ -684,6 +648,15 @@ audioPlayer.addEventListener('ended', () => {
   currentTrackIndex = nextIndex;
 
   playTrack(currentTracks[nextIndex]);
+});
+
+// Если трек упал с ошибкой
+audioPlayer.addEventListener('error', () => {
+  if (currentTracks.length > 1 && audioPlayer.src) {
+    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+    currentTrackIndex = nextIndex;
+    playTrack(currentTracks[nextIndex]);
+  }
 });
 
 window.addEventListener('beforeunload', savePlayerState);
