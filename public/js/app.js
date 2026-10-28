@@ -248,6 +248,8 @@ async function restorePlayerState() {
     isPlaying = false;
     btnPlay.textContent = '▶';
 
+    updateMediaSession(track);
+
     audioPlayer.addEventListener('loadedmetadata', () => {
       if (savedTime > 0 && savedTime < audioPlayer.duration) {
         audioPlayer.currentTime = savedTime;
@@ -358,7 +360,6 @@ function renderSearchResults(tracks, albums) {
     albums.forEach(album => {
       const div = document.createElement('div');
       div.className = 'track-item';
-
       const isSaved = userSavedAlbumIds.has(String(album.id));
 
       div.innerHTML = `
@@ -572,41 +573,42 @@ function playTrack(track) {
 
   updateMediaSession(track);
 
+  // ВАЖНО: НЕ вызываем audioPlayer.load() — смена src автоматически загружает трек.
+  // .load() сбрасывает медиасессию и в фоне Android останавливает воспроизведение.
   audioPlayer.src = getStreamUrl(track);
 
-  audioPlayer.addEventListener('playing', () => {
+  const onPlaying = () => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
     savePlayerState();
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-  }, { once: true });
+  };
+  audioPlayer.addEventListener('playing', onPlaying, { once: true });
 
-  audioPlayer.play().then(() => {
-    fetch('/api/search/history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        track_id: track.id, title: track.title, artist_name: track.artist_name,
-        duration: track.duration, genre: track.genre
-      })
-    }).catch(err => {});
-  }).catch(err => {
-    btnPlay.textContent = '▶';
-    isPlaying = false;
+  // ВАЖНО: НЕ используем setTimeout в обработчике — таймеры троттлятся в фоне.
+  // Пробуем play() синхронно. Если не получится — сработает canplay.
+  audioPlayer.play().catch(err => {
+    console.warn('Первая попытка play() отклонена:', err.name);
   });
 
-  if (track.permalink_url) {
-    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.duration) {
-          currentTrackRealDuration = data.duration;
-          totalTimeEl.textContent = formatTime(data.duration);
-        }
-      }).catch(e => {});
-  }
+  // Страховка: если play() не сработал (например, в фоне), ждём готовности данных и пробуем снова
+  audioPlayer.addEventListener('canplay', function onCanPlay() {
+    audioPlayer.removeEventListener('canplay', onCanPlay);
+    if (!isPlaying) {
+      audioPlayer.play().catch(() => {});
+    }
+  }, { once: true });
 
-  // Предзагрузка
+  fetch('/api/search/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      track_id: track.id, title: track.title, artist_name: track.artist_name,
+      duration: track.duration, genre: track.genre
+    })
+  }).catch(err => {});
+
+  // Предзагрузка следующего трека для быстрого скипа
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -624,11 +626,11 @@ function playTrack(track) {
 // --- ФУНКЦИЯ УСТАНОВКИ ОБЛОЖКИ ВИДЖЕТА ---
 function updateMediaSession(track) {
   if (!('mediaSession' in navigator)) return;
-  
   try {
-    const cover = track.cover_url 
-      ? (window.location.origin + track.cover_url) 
-      : (window.location.origin + '/img/default-cover.png');
+    let cover = track.cover_url || '/img/default-cover.png';
+    if (!cover.startsWith('http')) {
+      cover = window.location.origin + cover;
+    }
 
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title || 'Muzlo',
@@ -711,16 +713,33 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
+// ВАЖНО: обработчик ended — БЕЗ setTimeout, чтобы работал в фоне
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
   if (currentTracks.length === 0) return;
+
   const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
   document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
   const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
   if (nextEl) nextEl.classList.add('active');
   currentTrackIndex = nextIndex;
+
+  // Вызываем СРАЗУ, синхронно — без таймеров.
+  // Событие ended не троттлится, а setTimeout в фоне может задержаться на минуту.
   playTrack(currentTracks[nextIndex]);
+});
+
+// Страховка: если трек упал с ошибкой (например, SoundCloud временно недоступен),
+// переключаемся на следующий трек.
+audioPlayer.addEventListener('error', (e) => {
+  if (!audioPlayer.src || currentTracks.length < 2) return;
+  console.warn('Ошибка аудио, пропускаем трек');
+  setTimeout(() => {
+    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+    currentTrackIndex = nextIndex;
+    playTrack(currentTracks[nextIndex]);
+  }, 1500);
 });
 
 window.addEventListener('beforeunload', savePlayerState);
@@ -894,9 +913,9 @@ function renderLibraryPage(tracks, albums) {
     controlsDiv.style.flexWrap = 'wrap';
     controlsDiv.style.gap = '8px';
     controlsDiv.style.marginBottom = '20px';
-    controlsDiv.style.width = '100%'; 
+    controlsDiv.style.width = '100%';
     controlsDiv.style.boxSizing = 'border-box';
-    
+
     controlsDiv.innerHTML = `
       <button id="lib-shuffle" style="flex: 1; min-width: 90px; padding: 8px 4px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; white-space: nowrap;">🔀 Перемешать</button>
       <button id="lib-asc" style="flex: 1; min-width: 90px; padding: 8px 4px; background: #282828; color: white; border: 1px solid #444; border-radius: 20px; cursor: pointer; font-size: 12px; white-space: nowrap;">⬇️ Сверху вниз</button>
