@@ -372,7 +372,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (ТОЛЬКО СТАРЫЙ ДОБРЫЙ SCDL.DOWNLOAD)
+// 12. СТРИМИНГ (Простой, как раньше)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
