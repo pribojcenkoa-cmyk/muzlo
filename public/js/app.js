@@ -49,6 +49,7 @@ let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
 let limiterNode = null;
+let outputGainNode = null;
 
 // --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА (РЕГИСТРИРУЕМ 1 РАЗ) ---
 if ('mediaSession' in navigator) {
@@ -114,17 +115,23 @@ function initAudioContext() {
     sourceNode = audioContext.createMediaElementSource(audioPlayer);
     gainNode = audioContext.createGain();
     
-    // Лимитер: делает звук громче целиком, не давая басам "захрипеть"
+    // ЖЕСТКИЙ ЛИМИТЕР (сжимает всё в кашу, чтобы не было хрипа)
     limiterNode = audioContext.createDynamicsCompressor();
-    limiterNode.threshold.setValueAtTime(-3, audioContext.currentTime); 
+    limiterNode.threshold.setValueAtTime(-15, audioContext.currentTime); // Ловит абсолютно всё
     limiterNode.knee.setValueAtTime(0, audioContext.currentTime);
-    limiterNode.ratio.setValueAtTime(20, audioContext.currentTime); 
-    limiterNode.attack.setValueAtTime(0.003, audioContext.currentTime);
-    limiterNode.release.setValueAtTime(0.25, audioContext.currentTime);
+    limiterNode.ratio.setValueAtTime(20, audioContext.currentTime); // Максимальное сжатие
+    limiterNode.attack.setValueAtTime(0.001, audioContext.currentTime); // Мгновенно
+    limiterNode.release.setValueAtTime(0.1, audioContext.currentTime);
 
+    // МОЩНЫЙ БУСТЕР НА ВЫХОДЕ
+    outputGainNode = audioContext.createGain();
+    outputGainNode.gain.value = 3.5; 
+
+    // Цепочка: Источник -> Усилитель -> Лимитер -> Бустер -> Динамики
     sourceNode.connect(gainNode);
     gainNode.connect(limiterNode);
-    limiterNode.connect(audioContext.destination);
+    limiterNode.connect(outputGainNode);
+    outputGainNode.connect(audioContext.destination);
   } catch (e) {
     console.error('Web Audio API не поддерживается:', e);
   }
@@ -579,7 +586,6 @@ function playTrack(track) {
 
   updateMediaSession(track);
 
-  // БЕЗ ВСЯКИХ LOAD()! Просто меняем src.
   audioPlayer.src = getStreamUrl(track);
 
   audioPlayer.play().then(() => {
@@ -598,7 +604,6 @@ function playTrack(track) {
     })
   }).catch(err => {});
 
-  // Браузерная предзагрузка следующего трека для быстрого скипа
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -697,17 +702,25 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-// --- ГРОМКОСТЬ (ДО 300% С ЛИМИТЕРОМ) ---
+// --- ГРОМКОСТЬ (МАКСИМАЛЬНО ГРОМКО) ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
 
   if (value <= 100) {
     if (gainNode) gainNode.gain.value = 1;
+    if (outputGainNode) outputGainNode.gain.value = 1;
     audioPlayer.volume = value / 100;
   } else {
     audioPlayer.volume = 1;
-    if (gainNode) gainNode.gain.value = value / 100;
+    // Входной сигнал раскачиваем в 15 раз (на 300%) - лимитер всё это сплющит
+    if (gainNode) gainNode.gain.value = Math.pow(value / 100, 3);
+    
+    // А на выходе возвращаем громкость бустером
+    if (outputGainNode) {
+      // От 1 до 3.5 в зависимости от ползунка (100% = 1, 300% = 3.5)
+      outputGainNode.gain.value = 1.0 + ((value - 100) / 200) * 2.5; 
+    }
   }
 }
 
