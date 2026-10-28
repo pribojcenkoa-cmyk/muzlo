@@ -43,7 +43,6 @@ let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let isPoppingState = false;
-let hiddenPreloader = null;
 
 // Web Audio API
 let audioContext = null;
@@ -206,7 +205,6 @@ async function performSearch(query) {
   }
 }
 
-// 3. СОХРАНЕНИЕ ПЛЕЕРА
 function savePlayerState() {
   if (!audioPlayer.src) return;
   const track = currentTracks[currentTrackIndex];
@@ -258,7 +256,6 @@ async function restorePlayerState() {
   } catch (e) {}
 }
 
-// 4. РЕНДЕР
 function renderTracks(tracksArray, isLibrary = false) {
   currentTracks = tracksArray || [];
   trackListEl.innerHTML = '';
@@ -519,7 +516,6 @@ trackListEl.addEventListener('click', (e) => {
   }
 });
 
-// 5. АРТИСТ
 async function loadArtistPage(artistName) {
   if (!artistName || artistName === 'Неизвестен') return;
   [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
@@ -540,7 +536,6 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -571,7 +566,6 @@ function playTrack(track) {
 
   updateMediaSession(track);
 
-  // БЕЗ audioPlayer.load() — просто ставим src
   audioPlayer.src = getStreamUrl(track);
 
   audioPlayer.play().catch(err => {
@@ -587,24 +581,8 @@ function playTrack(track) {
       duration: track.duration, genre: track.genre
     })
   }).catch(err => {});
-
-  // Предзагрузка следующего трека в фоне
-  if (currentTracks.length > 1) {
-    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-    const nextTrack = currentTracks[nextIndex];
-    if (nextTrack) {
-      if (!hiddenPreloader) {
-        hiddenPreloader = new Audio();
-        hiddenPreloader.preload = 'auto';
-        hiddenPreloader.muted = true;
-      }
-      hiddenPreloader.src = getStreamUrl(nextTrack);
-      hiddenPreloader.load();
-    }
-  }
 }
 
-// --- ВИДЖЕТ ---
 function updateMediaSession(track) {
   if (!('mediaSession' in navigator)) return;
   try {
@@ -675,7 +653,6 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-// --- ГРОМКОСТЬ ДО 300% ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -691,7 +668,6 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// --- КОНЕЦ ТРЕКА (БЕЗ ОТСЛЕЖИВАНИЯ ВРЕМЕНИ) ---
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
@@ -706,7 +682,6 @@ audioPlayer.addEventListener('ended', () => {
   playTrack(currentTracks[nextIndex]);
 });
 
-// Если трек упал с ошибкой в фоне
 audioPlayer.addEventListener('error', () => {
   if (currentTracks.length > 1 && audioPlayer.src) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
@@ -717,7 +692,6 @@ audioPlayer.addEventListener('error', () => {
 
 window.addEventListener('beforeunload', savePlayerState);
 
-// 7. НАВИГАЦИЯ
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
@@ -984,7 +958,6 @@ function renderLibraryTracks(tracks, container) {
   });
 }
 
-// 8. АВТОРИЗАЦИЯ
 authContainer.addEventListener('click', (e) => {
   if (e.target.id === 'btn-open-auth') authModal.classList.add('active');
   if (e.target.id === 'btn-logout') logout();
@@ -1087,7 +1060,6 @@ async function checkAuth() {
   } catch (err) {}
 }
 
-// --- СБРОС ПАРОЛЯ ---
 const btnForgot = document.getElementById('btn-forgot-password');
 const resetBlock = document.getElementById('reset-password-block');
 const btnBackToLogin = document.getElementById('btn-back-to-login');
@@ -1126,7 +1098,6 @@ if (btnForgot) {
   });
 }
 
-// 9. ИМПОРТ
 if (importBtn) {
   importBtn.addEventListener('click', () => { importModal.classList.add('active'); importStatus.textContent = ''; importUrlInput.value = ''; importTextInput.value = ''; });
 }
@@ -1170,7 +1141,6 @@ btnDoImport.addEventListener('click', async () => {
   } catch (err) { importStatus.style.color = '#ff4d4d'; importStatus.textContent = 'Ошибка соединения.'; btnDoImport.disabled = false; }
 });
 
-// 10. СТАРТ
 initAudioContext();
 restorePlayerState();
 checkAuth();
@@ -1182,7 +1152,6 @@ else if (initialHash === 'search') navSearch.click();
 else if (initialHash === 'profile') navProfile.click();
 else navHome.click();
 
-// --- ЗАЩИТА (ПКМ и F12) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
 document.addEventListener('keydown', function(e) {
   if (e.keyCode === 123) { e.preventDefault(); return false; }
