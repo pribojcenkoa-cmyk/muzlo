@@ -44,10 +44,21 @@ let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let hiddenPreloader = null;
 
-// Web Audio API (Для 300% громкости)
+// Web Audio API
 let audioContext = null;
 let sourceNode = null;
 let gainNode = null;
+let limiterNode = null;
+
+// --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА (РЕГИСТРИРУЕМ 1 РАЗ) ---
+if ('mediaSession' in navigator) {
+  try {
+    navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
+    navigator.mediaSession.setActionHandler('pause', () => { if (isPlaying) btnPlay.click(); });
+    navigator.mediaSession.setActionHandler('previoustrack', () => btnPrev.click());
+    navigator.mediaSession.setActionHandler('nexttrack', () => btnNext.click());
+  } catch (error) {}
+}
 
 // Удаляем старый Service Worker
 if ('serviceWorker' in navigator) {
@@ -102,8 +113,18 @@ function initAudioContext() {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     sourceNode = audioContext.createMediaElementSource(audioPlayer);
     gainNode = audioContext.createGain();
+    
+    // Лимитер: делает звук громче целиком, не давая басам "захрипеть"
+    limiterNode = audioContext.createDynamicsCompressor();
+    limiterNode.threshold.setValueAtTime(-3, audioContext.currentTime); 
+    limiterNode.knee.setValueAtTime(0, audioContext.currentTime);
+    limiterNode.ratio.setValueAtTime(20, audioContext.currentTime); 
+    limiterNode.attack.setValueAtTime(0.003, audioContext.currentTime);
+    limiterNode.release.setValueAtTime(0.25, audioContext.currentTime);
+
     sourceNode.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    gainNode.connect(limiterNode);
+    limiterNode.connect(audioContext.destination);
   } catch (e) {
     console.error('Web Audio API не поддерживается:', e);
   }
@@ -527,7 +548,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
-// 6. ВОСПРОИЗВЕДЕНИЕ (Тот самый работающий код)
+// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -556,45 +577,28 @@ function playTrack(track) {
   btnPlay.textContent = '⏳';
   isPlaying = false;
 
+  updateMediaSession(track);
+
+  // БЕЗ ВСЯКИХ LOAD()! Просто меняем src.
   audioPlayer.src = getStreamUrl(track);
 
-  audioPlayer.addEventListener('playing', () => {
-    isPlaying = true;
-    btnPlay.textContent = '⏸';
-    savePlayerState();
-  }, { once: true });
-
   audioPlayer.play().then(() => {
-    fetch('/api/search/history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        track_id: track.id,
-        title: track.title,
-        artist_name: track.artist_name,
-        duration: track.duration,
-        genre: track.genre
-      })
-    }).catch(err => console.log('Не авторизован'));
-
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   }).catch(err => {
-    console.warn('Автовоспроизведение заблокировано:', err.message);
+    console.warn('Фоновая блокировка play():', err.name);
     btnPlay.textContent = '▶';
-    isPlaying = false;
   });
 
-  if (track.permalink_url) {
-    fetch(`/api/search/info?url=${encodeURIComponent(track.permalink_url)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.duration) {
-          currentTrackRealDuration = data.duration;
-          totalTimeEl.textContent = formatTime(data.duration);
-        }
-      }).catch(e => {});
-  }
+  fetch('/api/search/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      track_id: track.id, title: track.title, artist_name: track.artist_name,
+      duration: track.duration, genre: track.genre
+    })
+  }).catch(err => {});
 
-  // Браузерная предзагрузка следующего трека
+  // Браузерная предзагрузка следующего трека для быстрого скипа
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -607,6 +611,31 @@ function playTrack(track) {
       hiddenPreloader.load();
     }
   }
+}
+
+// --- ОБНОВЛЕНИЕ ВИДЖЕТА ---
+function updateMediaSession(track) {
+  if (!('mediaSession' in navigator)) return;
+  try {
+    let cover = track.cover_url || '/img/default-cover.png';
+    if (!cover.startsWith('http')) {
+      cover = window.location.origin + cover;
+    }
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title || 'Muzlo',
+      artist: track.artist_name || 'Неизвестен',
+      album: 'Muzlo',
+      artwork: [
+        { src: cover, sizes: '96x96' },
+        { src: cover, sizes: '128x128' },
+        { src: cover, sizes: '192x192' },
+        { src: cover, sizes: '256x256' },
+        { src: cover, sizes: '384x384' },
+        { src: cover, sizes: '512x512' }
+      ]
+    });
+  } catch (e) {}
 }
 
 btnPlay.addEventListener('click', () => {
@@ -643,6 +672,18 @@ btnPrev.addEventListener('click', () => {
   playTrack(currentTracks[prevIndex]);
 });
 
+audioPlayer.addEventListener('playing', () => {
+  isPlaying = true;
+  btnPlay.textContent = '⏸';
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+});
+
+audioPlayer.addEventListener('pause', () => {
+  isPlaying = false;
+  btnPlay.textContent = '▶';
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+});
+
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
@@ -656,7 +697,7 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-// --- ГРОМКОСТЬ (300%) ---
+// --- ГРОМКОСТЬ (ДО 300% С ЛИМИТЕРОМ) ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -672,7 +713,7 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// --- КОНЕЦ ТРЕКА ---
+// --- КОНЕЦ ТРЕКА (СРАБОТАЕТ В ФОНЕ БЛАГОДАРЯ ВИДЖЕТУ) ---
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
