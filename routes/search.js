@@ -5,7 +5,6 @@ import { query } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const require = createRequire(import.meta.url);
-const cheerio = require('cheerio');
 const scdl = require('soundcloud-downloader').default;
 
 const router = Router();
@@ -19,6 +18,7 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
+// Форматирование трека из SoundCloud
 function formatTrack(track) {
   if (!track) return null;
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
@@ -37,12 +37,16 @@ function formatTrack(track) {
 }
 
 async function searchSoundCloud(q, offset = 0) {
-  const searchResult = await scdl.search({
-    query: q, resourceType: 'tracks', limit: 50, offset: offset
-  });
-  return searchResult.collection
-    .filter(track => track.duration < 900000)
-    .map(track => formatTrack(track));
+  try {
+    const searchResult = await scdl.search({
+      query: q, resourceType: 'tracks', limit: 50, offset: offset
+    });
+    return searchResult.collection
+      .filter(track => track.duration < 900000)
+      .map(track => formatTrack(track));
+  } catch (e) {
+    return [];
+  }
 }
 
 // 1. Рекомендации
@@ -66,11 +70,13 @@ router.get('/trending', async (req, res) => {
 router.get('/', async (req, res) => {
   const q = req.query.q;
   if (!q) return res.json({ tracks: [], albums: [] });
+  
   try {
     const [tracks, playlistsRes] = await Promise.all([
-      searchSoundCloud(q).catch(() => []),
+      searchSoundCloud(q),
       scdl.search({ query: q, resourceType: 'playlists', limit: 20 }).catch(() => ({ collection: [] }))
     ]);
+
     const albums = playlistsRes.collection
       .filter(pl => pl.permalink_url)
       .map(pl => {
@@ -82,6 +88,7 @@ router.get('/', async (req, res) => {
           track_count: pl.track_count, permalink_url: pl.permalink_url, is_album: true
         };
       });
+
     res.json({ tracks, albums });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка поиска' });
@@ -139,28 +146,59 @@ router.get('/artist', async (req, res) => {
 // 5. Волна
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
-    const topArtists = await query(
-      `SELECT artist_name, COUNT(*) as play_count FROM listening_history 
-       WHERE user_id = $1 AND artist_name IS NOT NULL GROUP BY artist_name 
-       ORDER BY play_count DESC LIMIT 7`, [req.user.id]);
-    let baseArtists = topArtists.rows.map(r => r.artist_name);
-    if (baseArtists.length < 5) {
-      const liked = await query('SELECT DISTINCT artist_name FROM user_library WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5', [req.user.id]);
-      baseArtists = [...new Set([...baseArtists, ...liked.rows.map(r => r.artist_name)])];
+    const libraryRes = await query('SELECT track_id FROM user_library WHERE user_id = $1', [req.user.id]);
+    const likedTrackIds = new Set(libraryRes.rows.map(r => String(r.track_id)));
+
+    const genresRes = await query(
+      `SELECT genre, COUNT(*) as count 
+       FROM (
+         SELECT genre FROM listening_history WHERE user_id = $1 AND genre IS NOT NULL AND genre != ''
+         UNION ALL
+         SELECT genre FROM user_library WHERE user_id = $1 AND genre IS NOT NULL AND genre != ''
+       ) as all_genres
+       GROUP BY genre ORDER BY count DESC LIMIT 5`,
+      [req.user.id]
+    );
+    
+    let topGenres = genresRes.rows.map(r => r.genre);
+
+    if (topGenres.length === 0) {
+      const topHistory = await query(
+        `SELECT artist_name, COUNT(*) as play_count FROM listening_history 
+         WHERE user_id = $1 AND artist_name IS NOT NULL GROUP BY artist_name ORDER BY play_count DESC LIMIT 5`, 
+        [req.user.id]);
+      const topLiked = await query(
+        `SELECT DISTINCT artist_name FROM user_library 
+         WHERE user_id = $1 AND artist_name IS NOT NULL LIMIT 5`, 
+        [req.user.id]);
+      topGenres = [...new Set([
+        ...topHistory.rows.map(r => r.artist_name),
+        ...topLiked.rows.map(r => r.artist_name)
+      ])];
     }
-    if (baseArtists.length === 0) baseArtists = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
-    const randomPopular = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).filter(a => !baseArtists.includes(a)).slice(0, 3);
-    const allArtists = [...baseArtists, ...randomPopular];
+
+    if (topGenres.length === 0) {
+      topGenres = POPULAR_ARTISTS.sort(() => 0.5 - Math.random()).slice(0, 5);
+    }
+
     let allTracks = [];
-    for (const artist of allArtists) {
-      if (!artist || artist === 'Неизвестен') continue;
+    for (const queryStr of topGenres) {
       try {
-        const tracks = await searchSoundCloud(artist);
-        const filtered = tracks.filter(t => t.artist_name.toLowerCase().includes(artist.toLowerCase()) || artist.toLowerCase().includes(t.artist_name.toLowerCase()));
-        allTracks = allTracks.concat(filtered.sort(() => 0.5 - Math.random()).slice(0, 10));
+        const randomOffset = Math.floor(Math.random() * 30);
+        const tracks = await searchSoundCloud(queryStr, randomOffset);
+        const newTracks = tracks.filter(t => !likedTrackIds.has(String(t.id)));
+        allTracks = allTracks.concat(newTracks.sort(() => 0.5 - Math.random()).slice(0, 10));
       } catch (e) {}
     }
-    res.json({ tracks: allTracks.sort(() => 0.5 - Math.random()).slice(0, 40) });
+
+    if (allTracks.length === 0) {
+      const randomArtist = POPULAR_ARTISTS[Math.floor(Math.random() * POPULAR_ARTISTS.length)];
+      const fallbackTracks = await searchSoundCloud(randomArtist);
+      allTracks = fallbackTracks.filter(t => !likedTrackIds.has(String(t.id)));
+    }
+
+    const shuffled = allTracks.sort(() => 0.5 - Math.random()).slice(0, 40);
+    res.json({ tracks: shuffled });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
@@ -169,9 +207,12 @@ router.get('/my-wave', requireAuth, async (req, res) => {
 // 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
-    const { track_id, title, artist_name, duration } = req.body;
+    const { track_id, title, artist_name, duration, genre } = req.body;
     if (!track_id) return res.status(400).json({ error: 'Нет ID трека' });
-    await query('INSERT INTO listening_history (user_id, track_id, title, artist_name, duration) VALUES ($1, $2, $3, $4, $5)', [req.user.id, String(track_id), title, artist_name, duration]);
+    await query(
+      'INSERT INTO listening_history (user_id, track_id, title, artist_name, duration, genre) VALUES ($1, $2, $3, $4, $5, $6)', 
+      [req.user.id, String(track_id), title, artist_name, duration, genre || null]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка сохранения истории' });
@@ -322,15 +363,47 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (Самый первый вариант)
+// 12. СТРИМИНГ (Прямой редирект на CDN SoundCloud, чтобы экономить трафик хостинга)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
+
+    const info = await scdl.getInfo(trackUrl);
+    
+    // Ищем прогрессивный MP3 поток
+    const transcoding = info.media.transcodings.find(t => t.format.protocol === 'progressive') || info.media.transcodings[0];
+    
+    if (transcoding) {
+      const clientId = scdl.client_id || (transcoding.url.match(/client_id=([^&]+)/) || [])[1];
+      const resolveUrl = `${transcoding.url}?client_id=${clientId}`;
+
+      // Получаем прямой URL с серверов SoundCloud
+      const response = await axios.get(resolveUrl, {
+        maxRedirects: 0,
+        validateStatus: () => true,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+
+      let directUrl = null;
+      if (response.status === 302 && response.headers.location) {
+        directUrl = response.headers.location;
+      } else if (response.data && response.data.url) {
+        directUrl = response.data.url;
+      }
+
+      if (directUrl) {
+        return res.redirect(directUrl);
+      }
+    }
+    
+    // Запасной вариант, если SoundCloud вдруг не отдал прямую ссылку
     const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
     stream.pipe(res);
+
   } catch (err) {
+    console.error('Stream error:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
