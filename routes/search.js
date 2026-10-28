@@ -19,7 +19,6 @@ const POPULAR_ARTISTS = [
   'Juice WRLD', 'XXXTENTACION', 'Post Malone', 'The Weeknd'
 ];
 
-// Форматирование трека из SoundCloud
 function formatTrack(track) {
   if (!track) return null;
   let cover = track.artwork_url || (track.user && track.user.avatar_url);
@@ -207,7 +206,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
     let allTracks = [];
     for (const queryStr of topGenres) {
       try {
-        const randomOffset = Math.floor(Math.random() * 30); // Рандом для разнообразия
+        const randomOffset = Math.floor(Math.random() * 30);
         const tracks = await searchSoundCloud(queryStr, randomOffset);
         const newTracks = tracks.filter(t => !likedTrackIds.has(String(t.id)));
         allTracks = allTracks.concat(newTracks.sort(() => 0.5 - Math.random()).slice(0, 10));
@@ -395,29 +394,51 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (Оптимизирован для Android / фонового режима)
+// 12. СТРИМИНГ (Забираем прямой MP3, чтобы Render не обрывал на 10 секунде)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
+
+    // Получаем информацию о треке
+    const info = await scdl.getInfo(trackUrl);
     
-    const stream = await scdl.download(trackUrl);
+    // Ищем обычный MP3 поток (progressive)
+    let transcoding = info.media.transcodings.find(t => t.format.protocol === 'progressive');
     
-    // Заголовки, которые помогают Android понимать, что это полноценный медиафайл
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
-    if (stream.headers && stream.headers['content-length']) {
-      res.setHeader('Content-Length', stream.headers['content-length']);
+    if (!transcoding) {
+      // Если нет MP3 (редкость), используем стандартный метод scdl
+      const stream = await scdl.download(trackUrl);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      stream.pipe(res);
+      return;
     }
 
-    // Страховка от зависаний на 10-й секунде
-    stream.on('error', (err) => {
-      if (!res.headersSent) res.status(500).end();
-      else res.end();
+    // Формируем прямой URL до аудиофайла
+    const streamUrl = `${transcoding.url}?client_id=${scdl.client_id}`;
+    
+    // Скачиваем напрямую через axios, чтобы избежать обрывов
+    const response = await axios.get(streamUrl, { 
+      responseType: 'stream',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
     });
 
-    stream.pipe(res);
+    // Отдаем правильные заголовки
+    res.setHeader('Content-Type', 'audio/mpeg');
+    if (response.headers['content-length']) {
+      res.setHeader('Content-Length', response.headers['content-length']);
+    }
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    // Стримим аудио в браузер
+    response.data.pipe(res);
+
+    // Принудительно закрываем поток, если браузер разорвал соединение (например, при переключении трека)
+    response.data.on('error', () => { res.end(); });
+    req.on('close', () => { response.data.destroy(); });
+
   } catch (err) {
+    console.error('Stream error:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
