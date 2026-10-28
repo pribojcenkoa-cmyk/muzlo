@@ -49,7 +49,6 @@ async function searchSoundCloud(q, offset = 0) {
   }
 }
 
-// 1. Рекомендации
 router.get('/trending', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store'); 
   try {
@@ -66,7 +65,6 @@ router.get('/trending', async (req, res) => {
   }
 });
 
-// 2. Поиск
 router.get('/', async (req, res) => {
   const q = req.query.q;
   if (!q) return res.json({ tracks: [], albums: [] });
@@ -95,7 +93,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2.1. Альбом
 router.get('/album', async (req, res) => {
   try {
     let albumUrl = req.query.url;
@@ -134,7 +131,6 @@ router.get('/album', async (req, res) => {
   }
 });
 
-// 3. Инфо
 router.get('/info', async (req, res) => {
   try {
     const trackUrl = req.query.url;
@@ -146,7 +142,6 @@ router.get('/info', async (req, res) => {
   }
 });
 
-// 4. Артист
 router.get('/artist', async (req, res) => {
   const artistName = req.query.name;
   if (!artistName) return res.status(400).json({ error: 'Имя не передано' });
@@ -163,7 +158,6 @@ router.get('/artist', async (req, res) => {
   }
 });
 
-// 5. Волна (Подбор по ЖАНРАМ)
 router.get('/my-wave', requireAuth, async (req, res) => {
   try {
     const libraryRes = await query('SELECT track_id FROM user_library WHERE user_id = $1', [req.user.id]);
@@ -176,9 +170,7 @@ router.get('/my-wave', requireAuth, async (req, res) => {
          UNION ALL
          SELECT genre FROM user_library WHERE user_id = $1 AND genre IS NOT NULL AND genre != ''
        ) as all_genres
-       GROUP BY genre
-       ORDER BY count DESC
-       LIMIT 5`,
+       GROUP BY genre ORDER BY count DESC LIMIT 5`,
       [req.user.id]
     );
     
@@ -221,13 +213,11 @@ router.get('/my-wave', requireAuth, async (req, res) => {
 
     const shuffled = allTracks.sort(() => 0.5 - Math.random()).slice(0, 40);
     res.json({ tracks: shuffled });
-
   } catch (err) {
     res.status(500).json({ error: 'Ошибка генерации волны' });
   }
 });
 
-// 6. История
 router.post('/history', requireAuth, async (req, res) => {
   try {
     const { track_id, title, artist_name, duration, genre } = req.body;
@@ -242,7 +232,6 @@ router.post('/history', requireAuth, async (req, res) => {
   }
 });
 
-// 7. Статистика
 router.get('/stats', requireAuth, async (req, res) => {
   try {
     const totalTime = await query('SELECT SUM(duration) as total FROM listening_history WHERE user_id = $1', [req.user.id]);
@@ -258,12 +247,10 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// 8. Импорт лайков
 router.get('/import-likes', async (req, res) => {
   let rawUrl = req.query.url;
   if (!rawUrl) return res.status(400).json({ error: 'Ссылка не передана' });
   let url = rawUrl.split('?')[0].split('#')[0].replace(/\/$/, '').replace('/likes', '');
-  
   try {
     if (url.includes('on.soundcloud.com')) {
       try {
@@ -307,13 +294,11 @@ router.get('/import-likes', async (req, res) => {
   }
 });
 
-// 9. Импорт Яндекса
 router.get('/import-yandex', async (req, res) => {
   const url = req.query.url;
   if (!url || !url.includes('music.yandex.ru')) return res.status(400).json({ error: 'Ссылка не с Яндекса' });
   let parsedTracks = [];
   let apiUrl = null;
-  
   if (url.includes('/users/')) {
     const match = url.match(/users\/([^/]+)\/playlists\/(\d+)/);
     if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${match[1]}&kinds=${match[2]}&lang=ru`;
@@ -321,7 +306,6 @@ router.get('/import-yandex', async (req, res) => {
     const match = url.match(/playlists\/([a-zA-Z0-9-]+)/);
     if (match) apiUrl = `https://music.yandex.ru/handlers/playlist.jsx?uuid=${match[1]}&lang=ru`;
   }
-  
   if (apiUrl) {
     const PROXIES = [
       `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(apiUrl)}`,
@@ -337,7 +321,6 @@ router.get('/import-yandex', async (req, res) => {
       } catch (err) {}
     }
   }
-  
   if (parsedTracks.length === 0) {
     try {
       const jinaUrl = `https://r.jina.ai/${url}`;
@@ -352,9 +335,7 @@ router.get('/import-yandex', async (req, res) => {
       }
     } catch (err) {}
   }
-  
   if (parsedTracks.length === 0) return res.status(404).json({ error: 'Яндекс блокирует запросы.' });
-  
   const tracks = [];
   for (const track of parsedTracks) {
     if (!track.title) continue;
@@ -364,12 +345,10 @@ router.get('/import-yandex', async (req, res) => {
       if (found.length > 0) tracks.push(found[0]);
     } catch (e) {}
   }
-  
   if (tracks.length === 0) return res.status(404).json({ error: 'Ничего не найдено в SoundCloud.' });
   res.json({ tracks });
 });
 
-// 10. Импорт текста
 router.post('/import-text', async (req, res) => {
   const { text } = req.body;
   if (!text || text.length < 5) return res.status(400).json({ error: 'Вставьте список' });
@@ -382,7 +361,6 @@ router.post('/import-text', async (req, res) => {
   res.json({ tracks });
 });
 
-// 11. Обложки
 router.get('/cover', async (req, res) => {
   try {
     const imageUrl = req.query.url;
@@ -394,51 +372,15 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (Забираем прямой MP3, чтобы Render не обрывал на 10 секунде)
+// 12. СТРИМИНГ (ТОЛЬКО СТАРЫЙ ДОБРЫЙ SCDL.DOWNLOAD)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
     if (!trackUrl) throw new Error('Ссылка не передана');
-
-    // Получаем информацию о треке
-    const info = await scdl.getInfo(trackUrl);
-    
-    // Ищем обычный MP3 поток (progressive)
-    let transcoding = info.media.transcodings.find(t => t.format.protocol === 'progressive');
-    
-    if (!transcoding) {
-      // Если нет MP3 (редкость), используем стандартный метод scdl
-      const stream = await scdl.download(trackUrl);
-      res.setHeader('Content-Type', 'audio/mpeg');
-      stream.pipe(res);
-      return;
-    }
-
-    // Формируем прямой URL до аудиофайла
-    const streamUrl = `${transcoding.url}?client_id=${scdl.client_id}`;
-    
-    // Скачиваем напрямую через axios, чтобы избежать обрывов
-    const response = await axios.get(streamUrl, { 
-      responseType: 'stream',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    });
-
-    // Отдаем правильные заголовки
+    const stream = await scdl.download(trackUrl);
     res.setHeader('Content-Type', 'audio/mpeg');
-    if (response.headers['content-length']) {
-      res.setHeader('Content-Length', response.headers['content-length']);
-    }
-    res.setHeader('Accept-Ranges', 'bytes');
-
-    // Стримим аудио в браузер
-    response.data.pipe(res);
-
-    // Принудительно закрываем поток, если браузер разорвал соединение (например, при переключении трека)
-    response.data.on('error', () => { res.end(); });
-    req.on('close', () => { response.data.destroy(); });
-
+    stream.pipe(res);
   } catch (err) {
-    console.error('Stream error:', err.message);
     if (!res.headersSent) res.status(500).send('Ошибка стриминга');
   }
 });
