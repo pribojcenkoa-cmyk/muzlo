@@ -50,8 +50,9 @@ let sourceNode = null;
 let gainNode = null;
 let limiterNode = null;
 let outputGainNode = null;
+let vocalBoostNode = null; // <-- НОВЫЙ УЗЕЛ (Эквалайзер для голоса)
 
-// --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА (РЕГИСТРИРУЕМ 1 РАЗ) ---
+// --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА ---
 if ('mediaSession' in navigator) {
   try {
     navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
@@ -113,22 +114,31 @@ function initAudioContext() {
   try {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     sourceNode = audioContext.createMediaElementSource(audioPlayer);
+
+    // 1. ЭКВАЛАЙЗЕР ДЛЯ ВОКАЛА (Поднимаем середину, где голос)
+    vocalBoostNode = audioContext.createBiquadFilter();
+    vocalBoostNode.type = 'peaking';
+    vocalBoostNode.frequency.value = 2000; // 2000 Гц - частота человеческого голоса
+    vocalBoostNode.Q.value = 1.0; // Ширина полосы
+    vocalBoostNode.gain.value = 8; // Поднимаем голос на +8 Дб
+    
+    // 2. ОБЩИЙ УСИЛИТЕЛЬ
     gainNode = audioContext.createGain();
     
-    // ЖЕСТКИЙ ЛИМИТЕР (сжимает всё в кашу, чтобы не было хрипа)
+    // 3. ЛИМИТЕР (Защита от хрипа)
     limiterNode = audioContext.createDynamicsCompressor();
-    limiterNode.threshold.setValueAtTime(-15, audioContext.currentTime); // Ловит абсолютно всё
-    limiterNode.knee.setValueAtTime(0, audioContext.currentTime);
-    limiterNode.ratio.setValueAtTime(20, audioContext.currentTime); // Максимальное сжатие
-    limiterNode.attack.setValueAtTime(0.001, audioContext.currentTime); // Мгновенно
-    limiterNode.release.setValueAtTime(0.1, audioContext.currentTime);
+    limiterNode.threshold.setValueAtTime(-5, audioContext.currentTime); 
+    limiterNode.knee.setValueAtTime(10, audioContext.currentTime);
+    limiterNode.ratio.setValueAtTime(12, audioContext.currentTime); 
+    limiterNode.attack.setValueAtTime(0.005, audioContext.currentTime);
+    limiterNode.release.setValueAtTime(0.25, audioContext.currentTime);
 
-    // МОЩНЫЙ БУСТЕР НА ВЫХОДЕ
+    // 4. ВЫХОДНОЙ БУСТЕР
     outputGainNode = audioContext.createGain();
-    outputGainNode.gain.value = 3.5; 
 
-    // Цепочка: Источник -> Усилитель -> Лимитер -> Бустер -> Динамики
-    sourceNode.connect(gainNode);
+    // Цепочка: Источник -> Эквалайзер -> Усилитель -> Лимитер -> Бустер -> Динамики
+    sourceNode.connect(vocalBoostNode);
+    vocalBoostNode.connect(gainNode);
     gainNode.connect(limiterNode);
     limiterNode.connect(outputGainNode);
     outputGainNode.connect(audioContext.destination);
@@ -702,7 +712,7 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-// --- ГРОМКОСТЬ (МАКСИМАЛЬНО ГРОМКО) ---
+// --- ГРОМКОСТЬ И ЭКВАЛАЙЗЕР ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -713,20 +723,19 @@ function updateVolume() {
     audioPlayer.volume = value / 100;
   } else {
     audioPlayer.volume = 1;
-    // Входной сигнал раскачиваем в 15 раз (на 300%) - лимитер всё это сплющит
-    if (gainNode) gainNode.gain.value = Math.pow(value / 100, 3);
+    // Входной сигнал делаем в 5 раз мощнее на 300%
+    if (gainNode) gainNode.gain.value = Math.pow(value / 100, 1.5);
     
-    // А на выходе возвращаем громкость бустером
+    // На выходе добавляем еще буст
     if (outputGainNode) {
-      // От 1 до 3.5 в зависимости от ползунка (100% = 1, 300% = 3.5)
-      outputGainNode.gain.value = 1.0 + ((value - 100) / 200) * 2.5; 
+      outputGainNode.gain.value = 1.0 + ((value - 100) / 200) * 2.0; 
     }
   }
 }
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// --- КОНЕЦ ТРЕКА (СРАБОТАЕТ В ФОНЕ БЛАГОДАРЯ ВИДЖЕТУ) ---
+// --- КОНЕЦ ТРЕКА ---
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
