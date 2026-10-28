@@ -50,9 +50,10 @@ let sourceNode = null;
 let gainNode = null;
 let limiterNode = null;
 let outputGainNode = null;
-let vocalBoostNode = null; // <-- НОВЫЙ УЗЕЛ (Эквалайзер для голоса)
+let vocalBoostNode = null;
+let silentOscillator = null;
 
-// --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА ---
+// --- MEDIA SESSION ---
 if ('mediaSession' in navigator) {
   try {
     navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) btnPlay.click(); });
@@ -115,17 +116,14 @@ function initAudioContext() {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     sourceNode = audioContext.createMediaElementSource(audioPlayer);
 
-    // 1. ЭКВАЛАЙЗЕР ДЛЯ ВОКАЛА (Поднимаем середину, где голос)
     vocalBoostNode = audioContext.createBiquadFilter();
     vocalBoostNode.type = 'peaking';
-    vocalBoostNode.frequency.value = 2000; // 2000 Гц - частота человеческого голоса
-    vocalBoostNode.Q.value = 1.0; // Ширина полосы
-    vocalBoostNode.gain.value = 8; // Поднимаем голос на +8 Дб
+    vocalBoostNode.frequency.value = 2000;
+    vocalBoostNode.Q.value = 1.0;
+    vocalBoostNode.gain.value = 8;
     
-    // 2. ОБЩИЙ УСИЛИТЕЛЬ
     gainNode = audioContext.createGain();
     
-    // 3. ЛИМИТЕР (Защита от хрипа)
     limiterNode = audioContext.createDynamicsCompressor();
     limiterNode.threshold.setValueAtTime(-5, audioContext.currentTime); 
     limiterNode.knee.setValueAtTime(10, audioContext.currentTime);
@@ -133,10 +131,8 @@ function initAudioContext() {
     limiterNode.attack.setValueAtTime(0.005, audioContext.currentTime);
     limiterNode.release.setValueAtTime(0.25, audioContext.currentTime);
 
-    // 4. ВЫХОДНОЙ БУСТЕР
     outputGainNode = audioContext.createGain();
 
-    // Цепочка: Источник -> Эквалайзер -> Усилитель -> Лимитер -> Бустер -> Динамики
     sourceNode.connect(vocalBoostNode);
     vocalBoostNode.connect(gainNode);
     gainNode.connect(limiterNode);
@@ -147,7 +143,28 @@ function initAudioContext() {
   }
 }
 
-async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+// --- АНТИ-ЗАМОРОЗКА ---
+function startAntiFreeze() {
+  if (silentOscillator || !audioContext) return;
+  try {
+    silentOscillator = audioContext.createOscillator();
+    const silentGain = audioContext.createGain();
+    silentGain.gain.value = 0.0001;
+    silentOscillator.frequency.value = 440;
+    silentOscillator.connect(silentGain);
+    silentGain.connect(audioContext.destination);
+    silentOscillator.start();
+  } catch (e) {}
+}
+
+function stopAntiFreeze() {
+  if (silentOscillator) {
+    try { silentOscillator.stop(); } catch (e) {}
+    silentOscillator = null;
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeout = 15000) { // Увеличили таймаут до 15 сек
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
@@ -600,6 +617,7 @@ function playTrack(track) {
 
   audioPlayer.play().then(() => {
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    startAntiFreeze();
   }).catch(err => {
     console.warn('Фоновая блокировка play():', err.name);
     btnPlay.textContent = '▶';
@@ -660,8 +678,11 @@ btnPlay.addEventListener('click', () => {
     btnPlay.textContent = '▶';
     isPlaying = false;
     savePlayerState();
+    stopAntiFreeze();
   } else {
-    audioPlayer.play();
+    audioPlayer.play().then(() => {
+      startAntiFreeze();
+    });
     btnPlay.textContent = '⏸';
     isPlaying = true;
   }
@@ -691,6 +712,7 @@ audioPlayer.addEventListener('playing', () => {
   isPlaying = true;
   btnPlay.textContent = '⏸';
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  startAntiFreeze();
 });
 
 audioPlayer.addEventListener('pause', () => {
@@ -712,7 +734,7 @@ audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-// --- ГРОМКОСТЬ И ЭКВАЛАЙЗЕР ---
+// --- ГРОМКОСТЬ ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -723,10 +745,7 @@ function updateVolume() {
     audioPlayer.volume = value / 100;
   } else {
     audioPlayer.volume = 1;
-    // Входной сигнал делаем в 5 раз мощнее на 300%
     if (gainNode) gainNode.gain.value = Math.pow(value / 100, 1.5);
-    
-    // На выходе добавляем еще буст
     if (outputGainNode) {
       outputGainNode.gain.value = 1.0 + ((value - 100) / 200) * 2.0; 
     }
@@ -746,6 +765,25 @@ audioPlayer.addEventListener('ended', () => {
   if (nextEl) nextEl.classList.add('active');
   currentTrackIndex = nextIndex;
   playTrack(currentTracks[nextIndex]);
+});
+
+// --- СТРАХОВКА ОТ ОШИБОК ---
+audioPlayer.addEventListener('error', () => {
+  if (currentTracks.length > 1 && audioPlayer.src) {
+    console.warn('Трек упал, переключаем на следующий');
+    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+    currentTrackIndex = nextIndex;
+    playTrack(currentTracks[nextIndex]);
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && isPlaying) {
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    startAntiFreeze();
+  }
 });
 
 window.addEventListener('beforeunload', savePlayerState);
@@ -776,14 +814,18 @@ window.addEventListener('popstate', (event) => {
 navHome.addEventListener('click', async () => {
   if (!isPoppingState) history.pushState({ tab: 'home' }, '', '#home');
   switchTab(navHome, 'Рекомендации');
-  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
-  await loadUserLikes();
+  trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка музыки... (Сервер может просыпаться до 30 сек)</p>';
+  
   try {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
     renderTracks(data.tracks);
   } catch (err) {
-    trackListEl.innerHTML = '<p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает.</p>';
+    trackListEl.innerHTML = `
+      <p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает или спит.</p>
+      <button onclick="document.getElementById('nav-home').click()" style="display:block; margin: 20px auto; padding: 10px 20px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer;">Попробовать снова</button>
+    `;
   }
 });
 
@@ -1224,16 +1266,27 @@ btnDoImport.addEventListener('click', async () => {
 });
 
 // 10. СТАРТ
-initAudioContext();
-restorePlayerState();
-checkAuth();
+async function bootApp() {
+  try {
+    initAudioContext();
+    restorePlayerState();
+    checkAuth(); // Не ждем await, чтобы не тормозить старт
 
-const initialHash = window.location.hash.replace('#', '');
-if (initialHash === 'library') navLibrary.click();
-else if (initialHash === 'wave') navWave.click();
-else if (initialHash === 'search') navSearch.click();
-else if (initialHash === 'profile') navProfile.click();
-else navHome.click();
+    // Принудительно кликаем на главную, чтобы запустить загрузку
+    setTimeout(() => {
+      const initialHash = window.location.hash.replace('#', '');
+      if (initialHash === 'library') navLibrary.click();
+      else if (initialHash === 'wave') navWave.click();
+      else if (initialHash === 'search') navSearch.click();
+      else if (initialHash === 'profile') navProfile.click();
+      else navHome.click();
+    }, 100);
+  } catch (e) {
+    console.error("Boot error:", e);
+    navHome.click();
+  }
+}
+bootApp();
 
 // --- ЗАЩИТА (ПКМ и F12) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
