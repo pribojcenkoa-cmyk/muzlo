@@ -322,7 +322,7 @@ router.get('/cover', async (req, res) => {
   } catch (err) { res.redirect('/img/default-cover.png'); }
 });
 
-// 12. СТРИМИНГ (ТОЛЬКО СТАРЫЙ)
+// 12. СТРИМИНГ (Самый первый вариант)
 router.get('/stream', async (req, res) => {
   try {
     const trackUrl = req.query.url;
