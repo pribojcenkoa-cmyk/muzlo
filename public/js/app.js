@@ -59,7 +59,6 @@ if ('mediaSession' in navigator) {
   } catch (error) {}
 }
 
-// Удаляем старый Service Worker и кэш
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(function(registrations) {
     for (let registration of registrations) registration.unregister();
@@ -536,6 +535,7 @@ async function loadArtistPage(artistName) {
   }
 }
 
+// 6. ВОСПРОИЗВЕДЕНИЕ
 function playTrack(track) {
   const playerEl = document.querySelector('.player');
   if (playerEl && playerEl.classList.contains('hidden')) {
@@ -564,10 +564,12 @@ function playTrack(track) {
   btnPlay.textContent = '⏳';
   isPlaying = false;
 
+  // Обновляем виджет
   updateMediaSession(track);
 
   audioPlayer.src = getStreamUrl(track);
-
+  audioPlayer.load(); // <-- ВОТ ОНА, чтобы телефон видел реальную длительность
+  
   audioPlayer.play().catch(err => {
     console.warn('Фоновая блокировка play():', err.name);
     btnPlay.textContent = '▶';
@@ -649,6 +651,7 @@ audioPlayer.addEventListener('playing', () => {
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
 });
 
+// ОБНОВЛЯЕМ ВРЕМЯ ТОЛЬКО ПРИ ЗАГРУЗКЕ
 audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
@@ -668,6 +671,7 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
+// ПЕРЕКЛЮЧЕНИЕ ТОЛЬКО ПО КОНЦУ ТРЕКА
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
@@ -682,16 +686,9 @@ audioPlayer.addEventListener('ended', () => {
   playTrack(currentTracks[nextIndex]);
 });
 
-audioPlayer.addEventListener('error', () => {
-  if (currentTracks.length > 1 && audioPlayer.src) {
-    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-    currentTrackIndex = nextIndex;
-    playTrack(currentTracks[nextIndex]);
-  }
-});
-
 window.addEventListener('beforeunload', savePlayerState);
 
+// 7. НАВИГАЦИЯ
 function switchTab(activeTab, title, showSearch = false) {
   [navHome, navSearch, navLibrary, navWave, navProfile].forEach(el => el.classList.remove('active'));
   if (activeTab) activeTab.classList.add('active');
