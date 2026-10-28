@@ -43,7 +43,7 @@ let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
 let isPoppingState = false;
-let hiddenPreloader = null; // Скрытый плеер для предзагрузки
+let hiddenPreloader = null;
 
 // Web Audio API
 let audioContext = null;
@@ -571,6 +571,7 @@ function playTrack(track) {
 
   updateMediaSession(track);
 
+  // БЕЗ audioPlayer.load() — просто ставим src
   audioPlayer.src = getStreamUrl(track);
 
   audioPlayer.play().catch(err => {
@@ -587,8 +588,7 @@ function playTrack(track) {
     })
   }).catch(err => {});
 
-  // --- ПРЕДЗАГРУЗКА СЛЕДУЮЩЕГО ТРЕКА ---
-  // Скачиваем следующий трек в фоне, чтобы когда экран выключится, плеер взял его из памяти
+  // Предзагрузка следующего трека в фоне
   if (currentTracks.length > 1) {
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     const nextTrack = currentTracks[nextIndex];
@@ -596,7 +596,7 @@ function playTrack(track) {
       if (!hiddenPreloader) {
         hiddenPreloader = new Audio();
         hiddenPreloader.preload = 'auto';
-        hiddenPreloader.muted = true; // Беззвучно
+        hiddenPreloader.muted = true;
       }
       hiddenPreloader.src = getStreamUrl(nextTrack);
       hiddenPreloader.load();
@@ -668,24 +668,14 @@ btnPrev.addEventListener('click', () => {
 audioPlayer.addEventListener('playing', () => {
   isPlaying = true;
   btnPlay.textContent = '⏸';
-  savePlayerState();
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-});
-
-audioPlayer.addEventListener('timeupdate', () => {
-  const duration = currentTrackRealDuration || audioPlayer.duration;
-  currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
-  if (duration && !isNaN(duration)) {
-    totalTimeEl.textContent = formatTime(duration);
-  }
-  if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
 
 audioPlayer.addEventListener('loadedmetadata', () => {
   totalTimeEl.textContent = formatTime(currentTrackRealDuration || audioPlayer.duration);
 });
 
-// --- ГРОМКОСТЬ (ДО 300%) ---
+// --- ГРОМКОСТЬ ДО 300% ---
 function updateVolume() {
   const value = parseInt(volumeSlider.value);
   volumeLabel.textContent = value + '%';
@@ -701,7 +691,7 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// --- КОНЕЦ ТРЕКА ---
+// --- КОНЕЦ ТРЕКА (БЕЗ ОТСЛЕЖИВАНИЯ ВРЕМЕНИ) ---
 audioPlayer.addEventListener('ended', () => {
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
