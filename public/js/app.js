@@ -164,7 +164,7 @@ function stopAntiFreeze() {
   }
 }
 
-async function fetchWithTimeout(url, options = {}, timeout = 15000) { // Увеличили таймаут до 15 сек
+async function fetchWithTimeout(url, options = {}, timeout = 15000) { 
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
@@ -812,25 +812,33 @@ window.addEventListener('popstate', (event) => {
 });
 
 navHome.addEventListener('click', async () => {
-  if (!isPoppingState) history.pushState({ tab: 'home' }, '', '#home');
+  if (!isPoppingState) {
+    try { history.pushState({ tab: 'home' }, '', '#home'); } catch(e) { console.warn('pushState error:', e); }
+  }
   switchTab(navHome, 'Рекомендации');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка музыки... (Сервер может просыпаться до 30 сек)</p>';
   
   try {
     const res = await fetchWithTimeout('/api/search/trending');
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
+    if (!res.ok) throw new Error(data.error || 'Ошибка сервера');
     renderTracks(data.tracks);
   } catch (err) {
+    console.error('Trending error:', err);
     trackListEl.innerHTML = `
-      <p style="color:red; text-align:center; margin-top:40px;">Сервер не отвечает или спит.</p>
-      <button onclick="document.getElementById('nav-home').click()" style="display:block; margin: 20px auto; padding: 10px 20px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer;">Попробовать снова</button>
+      <div style="text-align: center; margin-top: 40px;">
+        <p style="color: #ff4d4d; font-weight: bold; font-size: 16px;">Не удалось загрузить музыку</p>
+        <p style="color: #b3b3b3; font-size: 14px; margin-top: 5px;">Сервер перегружен или просыпается</p>
+        <button onclick="document.getElementById('nav-home').click()" style="margin-top: 15px; padding: 10px 20px; background: #1db954; color: #000; border: none; border-radius: 20px; font-weight: bold; cursor: pointer;">Попробовать снова</button>
+      </div>
     `;
   }
 });
 
 navWave.addEventListener('click', async () => {
-  if (!isPoppingState) history.pushState({ tab: 'wave' }, '', '#wave');
+  if (!isPoppingState) {
+    try { history.pushState({ tab: 'wave' }, '', '#wave'); } catch(e) {}
+  }
   switchTab(navWave, 'Моя волна');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Слушаем ваши вкусы...</p>';
   await loadUserLikes();
@@ -852,7 +860,9 @@ navWave.addEventListener('click', async () => {
 });
 
 navProfile.addEventListener('click', async () => {
-  if (!isPoppingState) history.pushState({ tab: 'profile' }, '', '#profile');
+  if (!isPoppingState) {
+    try { history.pushState({ tab: 'profile' }, '', '#profile'); } catch(e) {}
+  }
   switchTab(navProfile, 'Мой профиль');
   trackListEl.innerHTML = '';
   profileStats.style.display = 'block';
@@ -889,7 +899,9 @@ navProfile.addEventListener('click', async () => {
 });
 
 navSearch.addEventListener('click', async () => {
-  if (!isPoppingState) history.pushState({ tab: 'search' }, '', '#search');
+  if (!isPoppingState) {
+    try { history.pushState({ tab: 'search' }, '', '#search'); } catch(e) {}
+  }
   switchTab(navSearch, 'Поиск по миру', true);
   searchInput.focus();
   await loadUserLikes();
@@ -915,7 +927,9 @@ searchInput.addEventListener('input', (e) => {
 });
 
 navLibrary.addEventListener('click', async () => {
-  if (!isPoppingState) history.pushState({ tab: 'library' }, '', '#library');
+  if (!isPoppingState) {
+    try { history.pushState({ tab: 'library' }, '', '#library'); } catch(e) {}
+  }
   switchTab(navLibrary, 'Моя медиатека');
   trackListEl.innerHTML = '<p style="color:#b3b3b3; text-align:center; margin-top:40px;">Загрузка...</p>';
   try {
@@ -1266,27 +1280,21 @@ btnDoImport.addEventListener('click', async () => {
 });
 
 // 10. СТАРТ
-async function bootApp() {
-  try {
-    initAudioContext();
-    restorePlayerState();
-    checkAuth(); // Не ждем await, чтобы не тормозить старт
+window.addEventListener('load', () => {
+  initAudioContext();
+  restorePlayerState();
+  checkAuth(); 
 
-    // Принудительно кликаем на главную, чтобы запустить загрузку
-    setTimeout(() => {
-      const initialHash = window.location.hash.replace('#', '');
-      if (initialHash === 'library') navLibrary.click();
-      else if (initialHash === 'wave') navWave.click();
-      else if (initialHash === 'search') navSearch.click();
-      else if (initialHash === 'profile') navProfile.click();
-      else navHome.click();
-    }, 100);
-  } catch (e) {
-    console.error("Boot error:", e);
-    navHome.click();
-  }
-}
-bootApp();
+  // Запускаем главную страницу
+  setTimeout(() => {
+    const initialHash = window.location.hash.replace('#', '');
+    if (initialHash === 'library') navLibrary.click();
+    else if (initialHash === 'wave') navWave.click();
+    else if (initialHash === 'search') navSearch.click();
+    else if (initialHash === 'profile') navProfile.click();
+    else navHome.click();
+  }, 100);
+});
 
 // --- ЗАЩИТА (ПКМ и F12) ---
 document.addEventListener('contextmenu', event => event.preventDefault());
