@@ -42,8 +42,10 @@ let lastSearchQuery = '';
 let userLikedTrackIds = new Set();
 let userSavedAlbumIds = new Set();
 let adminInterval = null;
-let hiddenPreloader = null;
 let isPoppingState = false;
+
+// Флаг для бесшовного переключения в фоне
+let hasSwitchedTrack = false; 
 
 // Web Audio API
 let audioContext = null;
@@ -164,7 +166,7 @@ async function loadAdminStats() {
     const totalEl = document.getElementById('admin-total');
     const playsEl = document.getElementById('admin-plays');
     if (onlineEl) onlineEl.textContent = data.online;
-    if (totalEl) totalEl.textContent = data.total_users;
+    if (totalEl) totalEl.textContent = data.users;
     if (playsEl) playsEl.textContent = data.plays_today;
 
     const usersContainer = document.getElementById('admin-users-list');
@@ -570,34 +572,23 @@ function playTrack(track) {
 
   btnPlay.textContent = '⏳';
   isPlaying = false;
+  hasSwitchedTrack = false; // Сбрасываем флаг для нового трека
 
   updateMediaSession(track);
 
-  // ВАЖНО: НЕ вызываем audioPlayer.load() — смена src автоматически загружает трек.
-  // .load() сбрасывает медиасессию и в фоне Android останавливает воспроизведение.
   audioPlayer.src = getStreamUrl(track);
 
-  const onPlaying = () => {
+  audioPlayer.addEventListener('playing', () => {
     isPlaying = true;
     btnPlay.textContent = '⏸';
     savePlayerState();
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-  };
-  audioPlayer.addEventListener('playing', onPlaying, { once: true });
-
-  // ВАЖНО: НЕ используем setTimeout в обработчике — таймеры троттлятся в фоне.
-  // Пробуем play() синхронно. Если не получится — сработает canplay.
-  audioPlayer.play().catch(err => {
-    console.warn('Первая попытка play() отклонена:', err.name);
-  });
-
-  // Страховка: если play() не сработал (например, в фоне), ждём готовности данных и пробуем снова
-  audioPlayer.addEventListener('canplay', function onCanPlay() {
-    audioPlayer.removeEventListener('canplay', onCanPlay);
-    if (!isPlaying) {
-      audioPlayer.play().catch(() => {});
-    }
   }, { once: true });
+
+  audioPlayer.play().catch(err => {
+    console.warn('Фоновая блокировка play():', err.name);
+    btnPlay.textContent = '▶';
+  });
 
   fetch('/api/search/history', {
     method: 'POST',
@@ -607,20 +598,6 @@ function playTrack(track) {
       duration: track.duration, genre: track.genre
     })
   }).catch(err => {});
-
-  // Предзагрузка следующего трека для быстрого скипа
-  if (currentTracks.length > 1) {
-    const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
-    const nextTrack = currentTracks[nextIndex];
-    if (nextTrack && nextTrack.stream_url) {
-      if (!hiddenPreloader) {
-        hiddenPreloader = new Audio();
-        hiddenPreloader.preload = 'auto';
-      }
-      hiddenPreloader.src = nextTrack.stream_url;
-      hiddenPreloader.load();
-    }
-  }
 }
 
 // --- ФУНКЦИЯ УСТАНОВКИ ОБЛОЖКИ ВИДЖЕТА ---
@@ -645,9 +622,7 @@ function updateMediaSession(track) {
         { src: cover, sizes: '512x512' }
       ]
     });
-  } catch (e) {
-    console.log('Ошибка метаданных MediaSession:', e);
-  }
+  } catch (e) {}
 }
 
 btnPlay.addEventListener('click', () => {
@@ -668,6 +643,7 @@ btnPlay.addEventListener('click', () => {
 
 btnNext.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
+  hasSwitchedTrack = true;
   const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
   document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
   const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
@@ -678,6 +654,7 @@ btnNext.addEventListener('click', () => {
 
 btnPrev.addEventListener('click', () => {
   if (currentTracks.length === 0) return;
+  hasSwitchedTrack = true;
   const prevIndex = (currentTrackIndex - 1 + currentTracks.length) % currentTracks.length;
   document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
   const prevEl = document.querySelector(`.track-item[data-index="${prevIndex}"]`);
@@ -689,8 +666,24 @@ btnPrev.addEventListener('click', () => {
 audioPlayer.addEventListener('timeupdate', () => {
   const duration = currentTrackRealDuration || audioPlayer.duration;
   currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+  
   if (duration && !isNaN(duration)) {
     totalTimeEl.textContent = formatTime(duration);
+    
+    // --- МАГИЯ ДЛЯ ФОНОВОГО РЕЖИМА ---
+    // Если до конца трека осталось меньше 1.5 секунд, и мы еще не переключили, меняем трек.
+    // Это предотвращает паузу, из-за которой Android усыпляет звук.
+    if (duration - audioPlayer.currentTime < 1.5 && !hasSwitchedTrack && currentTracks.length > 1) {
+      hasSwitchedTrack = true;
+      const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
+      
+      document.querySelectorAll('.track-item').forEach(el => el.classList.remove('active'));
+      const nextEl = document.querySelector(`.track-item[data-index="${nextIndex}"]`);
+      if (nextEl) nextEl.classList.add('active');
+      
+      currentTrackIndex = nextIndex;
+      playTrack(currentTracks[nextIndex]);
+    }
   }
   if (Math.floor(audioPlayer.currentTime) % 3 === 0) savePlayerState();
 });
@@ -713,8 +706,11 @@ function updateVolume() {
 
 volumeSlider.addEventListener('input', updateVolume);
 
-// ВАЖНО: обработчик ended — БЕЗ setTimeout, чтобы работал в фоне
+// Страховка (если timeupdate почему-то не сработал)
 audioPlayer.addEventListener('ended', () => {
+  if (hasSwitchedTrack) return;
+  hasSwitchedTrack = true;
+  
   localStorage.removeItem('muzlo_current_track');
   localStorage.removeItem('muzlo_current_time');
   if (currentTracks.length === 0) return;
@@ -725,21 +721,17 @@ audioPlayer.addEventListener('ended', () => {
   if (nextEl) nextEl.classList.add('active');
   currentTrackIndex = nextIndex;
 
-  // Вызываем СРАЗУ, синхронно — без таймеров.
-  // Событие ended не троттлится, а setTimeout в фоне может задержаться на минуту.
   playTrack(currentTracks[nextIndex]);
 });
 
-// Страховка: если трек упал с ошибкой (например, SoundCloud временно недоступен),
-// переключаемся на следующий трек.
-audioPlayer.addEventListener('error', (e) => {
-  if (!audioPlayer.src || currentTracks.length < 2) return;
-  console.warn('Ошибка аудио, пропускаем трек');
-  setTimeout(() => {
+// Страховка от разрыва соединения сервером в фоне
+audioPlayer.addEventListener('error', () => {
+  if (!hasSwitchedTrack && currentTracks.length > 1) {
+    hasSwitchedTrack = true;
     const nextIndex = (currentTrackIndex + 1) % currentTracks.length;
     currentTrackIndex = nextIndex;
     playTrack(currentTracks[nextIndex]);
-  }, 1500);
+  }
 });
 
 window.addEventListener('beforeunload', savePlayerState);
